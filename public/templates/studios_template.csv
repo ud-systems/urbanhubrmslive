@@ -1,0 +1,23 @@
+# Studios CSV Template
+# All fields are required except occupiedBy (leave empty if not occupied)
+# Room Grade options: Deluxe, Premium, Standard, Economy, Luxury
+# View options: City View, Sea View, Garden View, Street View, Courtyard View
+# Floor: Use numbers (1, 2, 3, etc.)
+# Occupied: Use true/false (or 1/0)
+# Occupied By: Leave empty if not occupied, or use student ID if occupied
+id,name,view,floor,roomGrade,occupied,occupiedBy
+STD001,Platinum Studio A1,Sea View,1,Deluxe,true,1
+STD002,Gold Studio B2,Garden View,2,Premium,false,
+STD003,Silver Studio C3,Courtyard View,1,Standard,true,2
+STD004,Executive Studio D4,City View,3,Luxury,false,
+STD005,Basic Studio E5,Street View,1,Economy,true,3
+STD006,Deluxe Studio F6,Sea View,2,Deluxe,false,
+STD007,Premium Studio G7,Garden View,1,Premium,true,4
+STD008,Standard Studio H8,Courtyard View,2,Standard,false,
+STD009,Luxury Studio I9,City View,3,Luxury,true,5
+STD010,Economy Studio J10,Street View,1,Economy,false,
+STD011,Platinum Studio K11,Sea View,2,Deluxe,true,6
+STD012,Gold Studio L12,Garden View,1,Premium,false,
+STD013,Silver Studio M13,Courtyard View,3,Standard,true,7
+STD014,Executive Studio N14,City View,2,Luxury,false,
+STD015,Basic Studio O15,Street View,1,Economy,true,8 

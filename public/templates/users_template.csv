@@ -1,0 +1,18 @@
+# Users CSV Template - For bulk user creation
+# All fields are required except email_verified and approved (default to false)
+# Role options: admin, salesperson, manager
+# Email format: Must be valid email format
+# Password: Minimum 6 characters (will be hashed automatically)
+# Email Verified: Use true/false (or 1/0)
+# Approved: Use true/false (or 1/0)
+name,email,password,role,email_verified,approved
+Sarah Johnson,sarah.johnson@urbanhub.com,password123,salesperson,true,true
+John Smith,john.smith@urbanhub.com,password123,salesperson,true,true
+Emma Wilson,emma.wilson@urbanhub.com,password123,salesperson,true,true
+Michael Chen,michael.chen@urbanhub.com,password123,manager,true,true
+Lisa Garcia,lisa.garcia@urbanhub.com,password123,salesperson,false,false
+Alex Thompson,alex.thompson@urbanhub.com,password123,salesperson,true,true
+Maria Rodriguez,maria.rodriguez@urbanhub.com,password123,salesperson,true,false
+James Lee,james.lee@urbanhub.com,password123,salesperson,false,false
+Sophie Anderson,sophie.anderson@urbanhub.com,password123,manager,true,true
+David Brown,david.brown@urbanhub.com,password123,admin,true,true 

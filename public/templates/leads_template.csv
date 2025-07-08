@@ -1,0 +1,18 @@
+# Leads CSV Template - Date format should be YYYY-MM-DD (e.g., 2024-09-01)
+# All fields are optional except name, phone, email, status, and source
+# Status options: New, Hot, Cold, Converted, Dead
+# Source options: WhatsApp, TikTok, Meta Ads, Direct, Instagram, Google Ads, Referral
+# Response Category options: Positive, Negative, Neutral, Interested, Not Interested, Follow Up
+# Follow Up Stage options: Initial Contact, Follow Up Call, Meeting Scheduled, Proposal Sent, Negotiation, Closed
+# Room Grade options: Deluxe, Premium, Standard, Economy, Luxury
+# Duration options: 12 weeks, 24 weeks, 36 weeks, 48 weeks, 52 weeks
+# Assigned To: Use actual salesperson names from your system
+name,phone,email,status,source,roomgrade,duration,revenue,assignedto,notes,dateofinquiry,responsecategory,followupstage
+Sarah Johnson,+447911123456,sarah.johnson@email.com,Hot,WhatsApp,Deluxe,48 weeks,15000,Sarah Johnson,Very interested in sea view studio. Budget flexible.,2024-01-15,Positive,Follow Up Call
+Michael Chen,+447922234567,michael.chen@email.com,New,TikTok,Premium,24 weeks,12000,John Smith,Found us through TikTok ad. Wants to start in March.,2024-01-16,Interested,Initial Contact
+Emma Wilson,+447933345678,emma.wilson@email.com,Cold,Meta Ads,Standard,36 weeks,9000,Emma Wilson,Showed initial interest but hasn't responded to follow-ups.,2024-01-10,Neutral,Follow Up Call
+David Brown,+447944456789,david.brown@email.com,Converted,Direct,Luxury,52 weeks,20000,Sarah Johnson,Converted to student. Assigned to Studio A1.,2024-01-05,Positive,Closed
+Lisa Garcia,+447955567890,lisa.garcia@email.com,Dead,Instagram,Economy,12 weeks,6000,John Smith,Not interested after seeing pricing. Budget too low.,2024-01-12,Negative,Closed
+Alex Thompson,+447966678901,alex.thompson@email.com,Hot,Google Ads,Premium,48 weeks,14000,Sarah Johnson,Very engaged. Wants virtual tour before deciding.,2024-01-14,Positive,Meeting Scheduled
+Maria Rodriguez,+447977789012,maria.rodriguez@email.com,New,Referral,Deluxe,36 weeks,16000,Emma Wilson,Referred by existing student. High potential.,2024-01-17,Interested,Initial Contact
+James Lee,+447988890123,james.lee@email.com,Cold,WhatsApp,Standard,24 weeks,8000,John Smith,Asked about availability but no follow-up.,2024-01-08,Neutral,Follow Up Call 
