@@ -30,7 +30,8 @@ import {
   Eye,
   Download,
   TrendingUp,
-  Receipt
+  Receipt,
+  RefreshCw
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import ComprehensiveStudentProfile from "@/components/ComprehensiveStudentProfile";
@@ -776,12 +777,50 @@ const StudentPortal = () => {
 
             {/* Profile Tab */}
             <TabsContent value="profile">
-              {student && (
-                <ComprehensiveStudentProfile 
-                  key={`profile-${student.id}`} 
-                  studentId={student.id} 
-                />
-              )}
+              <div className="space-y-4">
+                {/* Debug Info */}
+                <Card className="border-orange-200 bg-orange-50">
+                  <CardContent className="p-4">
+                    <h3 className="text-orange-800 font-medium mb-2">🔧 Profile Tab Debug Info</h3>
+                    <div className="text-sm text-orange-700 space-y-1">
+                      <p>Student Object: {student ? '✅ Loaded' : '❌ Null'}</p>
+                      <p>Student ID: {student?.id || 'N/A'}</p>
+                      <p>Student Name: {student?.name || 'N/A'}</p>
+                      <p>Active Tab: {activeTab}</p>
+                      <p>Loading State: {loading ? 'Loading' : 'Loaded'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Profile Component */}
+                {student ? (
+                  <ComprehensiveStudentProfile 
+                    key={`profile-${student.id}`} 
+                    studentId={student.id} 
+                  />
+                ) : (
+                  <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                    <CardContent className="pt-6">
+                      <div className="text-center py-8">
+                        <User className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-slate-900 mb-2">Profile Not Available</h3>
+                        <p className="text-slate-600 mb-4">
+                          {loading ? 'Loading student data...' : 'Student data could not be loaded.'}
+                        </p>
+                        {!loading && (
+                          <Button 
+                            onClick={() => fetchStudentData()}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Retry Loading
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             </TabsContent>
 
             {/* Documents Tab */}

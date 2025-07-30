@@ -30,7 +30,8 @@ import {
   Upload,
   Download,
   Trash2,
-  Eye
+  Eye,
+  RefreshCw
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -53,6 +54,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
   const [applicationData, setApplicationData] = useState<StudentApplication | null>(null);
   const [documentsData, setDocumentsData] = useState<any[]>([]);
   const [uploadingDocument, setUploadingDocument] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Form data matching ALL application form fields
   const [formData, setFormData] = useState({
@@ -111,9 +113,13 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
     current_visa_filename: ''
   });
 
+  console.log('🎯 ComprehensiveStudentProfile mounted with studentId:', studentId);
+
   const fetchStudentProfile = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
+      console.log('🔄 Fetching student profile for ID:', studentId);
       
       // Get student data
       const { data: student, error: studentError } = await supabase
@@ -122,7 +128,13 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         .eq('id', studentId)
         .single();
       
-      if (studentError) throw studentError;
+      if (studentError) {
+        console.error('❌ Student data error:', studentError);
+        setError(`Failed to load student data: ${studentError.message}`);
+        throw studentError;
+      }
+      
+      console.log('✅ Student data loaded:', student);
       setStudentData(student);
 
       const calculateAge = (birthday: string) => {
@@ -139,13 +151,21 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
 
       // Fetch application data if user_id exists
       if (student.user_id) {
+        console.log('🔄 Fetching application data for user_id:', student.user_id);
         const { data: application, error: appError } = await supabase
           .from('student_applications')
           .select('*')
           .eq('user_id', student.user_id)
           .single();
         
+        if (appError && appError.code !== 'PGRST116') {
+          console.error('❌ Application data error:', appError);
+          setError(`Failed to load application data: ${appError.message}`);
+          throw appError;
+        }
+        
         if (application) {
+          console.log('✅ Application data loaded:', application);
           setApplicationData(application);
           const newFormData = {
             // ✅ FIXED: Use consistent field mapping
@@ -192,6 +212,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             current_visa_filename: application.current_visa_filename || ''
           };
           
+          console.log('✅ Form data populated:', newFormData);
           setFormData(newFormData);
 
           // Fetch documents
@@ -202,6 +223,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           
           if (docs) setDocumentsData(docs);
         } else {
+          console.log('⚠️ No application data found, creating new application');
           // Create application record if it doesn't exist
           const newApplication = {
             user_id: student.user_id,
@@ -221,8 +243,11 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             .single();
 
           if (createError) {
-            console.error('Error creating application:', createError);
+            console.error('❌ Error creating application:', createError);
+            setError(`Failed to create application: ${createError.message}`);
+            throw createError;
           } else {
+            console.log('✅ New application created:', createdApplication);
             setApplicationData(createdApplication);
             const newFormData = {
               first_name: createdApplication.first_name || '',
@@ -270,9 +295,13 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             setFormData(newFormData);
           }
         }
+      } else {
+        console.log('⚠️ No user_id found for student');
+        setError('Student does not have a user account associated');
       }
     } catch (error) {
-      console.error('Error fetching student profile:', error);
+      console.error('❌ Error fetching student profile:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error occurred');
       toast({ title: 'Error', description: 'Failed to load profile', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -794,6 +823,38 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
 
   return (
     <div className="space-y-6">
+      {/* Loading State */}
+      {loading && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="p-6">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-blue-800">Loading student profile...</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-6">
+            <div className="text-center">
+              <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-4" />
+              <h3 className="text-red-800 font-medium mb-2">Error Loading Profile</h3>
+              <p className="text-red-700 mb-4">{error}</p>
+              <Button 
+                onClick={() => fetchStudentProfile()}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Retry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Debug Section - Remove in production */}
       <Card className="border-orange-200 bg-orange-50">
         <CardHeader>
@@ -817,7 +878,9 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
                   studentData,
                   applicationData,
                   formData,
-                  user
+                  user,
+                  loading,
+                  error
                 });
               }}
               className="text-xs"
@@ -852,328 +915,335 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             <p>Student ID: {studentId}</p>
             <p>User ID: {user?.id}</p>
             <p>Application ID: {applicationData?.id}</p>
+            <p>Loading: {loading ? 'Yes' : 'No'}</p>
+            <p>Error: {error || 'None'}</p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Profile Completion */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Profile Completion</span>
-            <Badge variant={profileCompletion >= 80 ? "default" : profileCompletion >= 60 ? "secondary" : "destructive"}>
-              {profileCompletion}% Complete
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Progress</span>
-              <span>{profileCompletion}%</span>
-            </div>
-            <Progress value={profileCompletion} className="w-full" />
-            <p className="text-xs text-muted-foreground">
-              Complete your profile to unlock all features
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Personal Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <User className="w-5 h-5 text-blue-600" />
-            <span>Personal Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {renderEditableField('first_name', 'Full Name', 'text')}
-            {renderEditableField('birthday', 'Birthday', 'date')}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-slate-600">Age</Label>
-              <div className="flex items-center justify-between p-2 border border-slate-200 rounded-lg bg-slate-50">
-                <p className="text-slate-900">
-                  {formData.age || 'Auto-calculated from birthday'}
+      {/* Only show content if not loading and no error */}
+      {!loading && !error && (
+        <>
+          {/* Profile Completion */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>Profile Completion</span>
+                <Badge variant={profileCompletion >= 80 ? "default" : profileCompletion >= 60 ? "secondary" : "destructive"}>
+                  {profileCompletion}% Complete
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Progress</span>
+                  <span>{profileCompletion}%</span>
+                </div>
+                <Progress value={profileCompletion} className="w-full" />
+                <p className="text-xs text-muted-foreground">
+                  Complete your profile to unlock all features
                 </p>
-                <span className="text-xs text-slate-500">Auto-calculated</span>
               </div>
-            </div>
-            {renderEditableField('ethnicity', 'Ethnicity', 'select', ethnicityOptions)}
-            {renderEditableField('gender', 'Gender', 'select', genderOptions)}
-            {renderEditableField('ucas_id', 'UCAS ID', 'text')}
-            {renderEditableField('country', 'Country', 'text')}
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      {/* Contact Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Mail className="w-5 h-5 text-green-600" />
-            <span>Contact Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderEditableField('email', 'Email', 'email')}
-            {renderEditableField('mobile', 'Mobile Phone', 'text')}
-            {renderEditableField('address_line_1', 'Address Line 1', 'text')}
-            {renderEditableField('address_line_2', 'Address Line 2', 'text')}
-            {renderEditableField('post_code', 'Post Code', 'text')}
-            {renderEditableField('town', 'Town/City', 'text')}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Academic Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <GraduationCap className="w-5 h-5 text-purple-600" />
-            <span>Academic Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderEditableField('year_of_study', 'Year of Study', 'select', yearOfStudyOptions)}
-            {renderEditableField('field_of_study', 'Field of Study', 'text')}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Additional Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Shield className="w-5 h-5 text-orange-600" />
-            <span>Additional Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderEditableField('is_disabled', 'Disability Status', 'checkbox')}
-            {renderEditableField('is_smoker', 'Smoker Status', 'checkbox')}
-            {renderEditableField('entry_into_uk', 'Entry into UK', 'text')}
-          </div>
-          <div className="col-span-full">
-            {renderEditableField('medical_requirements', 'Medical Requirements', 'textarea')}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Payment Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <CreditCard className="w-5 h-5 text-indigo-600" />
-            <span>Payment Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderEditableField('wants_installments', 'Do you want to pay in Installments?', 'checkbox')}
-            {formData.wants_installments && (
-              <div className="col-span-2">
-                {renderEditableField('selected_installment_plan', 'Choose Payment Installments', 'select', paymentInstallmentOptions)}
+          {/* Personal Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <User className="w-5 h-5 text-blue-600" />
+                <span>Personal Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {renderEditableField('first_name', 'Full Name', 'text')}
+                {renderEditableField('birthday', 'Birthday', 'date')}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-slate-600">Age</Label>
+                  <div className="flex items-center justify-between p-2 border border-slate-200 rounded-lg bg-slate-50">
+                    <p className="text-slate-900">
+                      {formData.age || 'Auto-calculated from birthday'}
+                    </p>
+                    <span className="text-xs text-slate-500">Auto-calculated</span>
+                  </div>
+                </div>
+                {renderEditableField('ethnicity', 'Ethnicity', 'select', ethnicityOptions)}
+                {renderEditableField('gender', 'Gender', 'select', genderOptions)}
+                {renderEditableField('ucas_id', 'UCAS ID', 'text')}
+                {renderEditableField('country', 'Country', 'text')}
               </div>
-            )}
-            {renderEditableField('payment_installments', 'Payment Plan', 'select', paymentInstallmentOptions)}
-            {renderEditableField('deposit_paid', 'Deposit Paid', 'checkbox')}
-            {renderEditableField('data_consent', 'Data Consent', 'checkbox')}
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      {/* Guarantor Information */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <User className="w-5 h-5 text-red-600" />
-            <span>Guarantor Information</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderEditableField('guarantor_name', 'Guarantor Name', 'text')}
-            {renderEditableField('guarantor_email', 'Guarantor Email', 'email')}
-            {renderEditableField('guarantor_phone', 'Guarantor Phone', 'text')}
-            {renderEditableField('guarantor_date_of_birth', 'Guarantor Date of Birth', 'date')}
-            {renderEditableField('guarantor_relationship', 'Guarantor Relationship', 'select', guarantorRelationshipOptions)}
-          </div>
-        </CardContent>
-      </Card>
+          {/* Contact Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Mail className="w-5 h-5 text-green-600" />
+                <span>Contact Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {renderEditableField('email', 'Email', 'email')}
+                {renderEditableField('mobile', 'Mobile Phone', 'text')}
+                {renderEditableField('address_line_1', 'Address Line 1', 'text')}
+                {renderEditableField('address_line_2', 'Address Line 2', 'text')}
+                {renderEditableField('post_code', 'Post Code', 'text')}
+                {renderEditableField('town', 'Town/City', 'text')}
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Document Uploads */}
-      <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <FileText className="w-5 h-5 text-teal-600" />
-            <span>Document Uploads</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Utility Bill */}
-            <div className="space-y-4">
-              <Label className="text-sm font-medium text-slate-600">Utility Bill (Less than 3 months old) *</Label>
-              {formData.utility_bill_url ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-600" />
-                      <span className="text-sm text-slate-900">{formData.utility_bill_filename}</span>
-                    </div>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.utility_bill_url, '_blank')}>
-                        <Eye className="w-3 h-3" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.utility_bill_url, '_blank')}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    </div>
+          {/* Academic Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <GraduationCap className="w-5 h-5 text-purple-600" />
+                <span>Academic Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {renderEditableField('year_of_study', 'Year of Study', 'select', yearOfStudyOptions)}
+                {renderEditableField('field_of_study', 'Field of Study', 'text')}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Additional Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Shield className="w-5 h-5 text-orange-600" />
+                <span>Additional Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {renderEditableField('is_disabled', 'Disability Status', 'checkbox')}
+                {renderEditableField('is_smoker', 'Smoker Status', 'checkbox')}
+                {renderEditableField('entry_into_uk', 'Entry into UK', 'text')}
+              </div>
+              <div className="col-span-full">
+                {renderEditableField('medical_requirements', 'Medical Requirements', 'textarea')}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Payment Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <CreditCard className="w-5 h-5 text-indigo-600" />
+                <span>Payment Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {renderEditableField('wants_installments', 'Do you want to pay in Installments?', 'checkbox')}
+                {formData.wants_installments && (
+                  <div className="col-span-2">
+                    {renderEditableField('selected_installment_plan', 'Choose Payment Installments', 'select', paymentInstallmentOptions)}
                   </div>
-                </div>
-              ) : (
-                <FileUpload
-                  label="Upload Utility Bill"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  onFileSelect={(file) => file && handleDocumentUpload('utility_bill', file)}
-                  uploading={uploadingDocument === 'utility_bill'}
-                />
-              )}
-            </div>
+                )}
+                {renderEditableField('payment_installments', 'Payment Plan', 'select', paymentInstallmentOptions)}
+                {renderEditableField('deposit_paid', 'Deposit Paid', 'checkbox')}
+                {renderEditableField('data_consent', 'Data Consent', 'checkbox')}
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Identity Document */}
-            <div className="space-y-4">
-              <Label className="text-sm font-medium text-slate-600">Driver's License / Passport / Birth Certificate *</Label>
-              {formData.identity_document_url ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-600" />
-                      <span className="text-sm text-slate-900">{formData.identity_document_filename}</span>
-                    </div>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.identity_document_url, '_blank')}>
-                        <Eye className="w-3 h-3" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.identity_document_url, '_blank')}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <FileUpload
-                  label="Upload Identity Document"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  onFileSelect={(file) => file && handleDocumentUpload('identity_document', file)}
-                  uploading={uploadingDocument === 'identity_document'}
-                />
-              )}
-            </div>
+          {/* Guarantor Information */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <User className="w-5 h-5 text-red-600" />
+                <span>Guarantor Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {renderEditableField('guarantor_name', 'Guarantor Name', 'text')}
+                {renderEditableField('guarantor_email', 'Guarantor Email', 'email')}
+                {renderEditableField('guarantor_phone', 'Guarantor Phone', 'text')}
+                {renderEditableField('guarantor_date_of_birth', 'Guarantor Date of Birth', 'date')}
+                {renderEditableField('guarantor_relationship', 'Guarantor Relationship', 'select', guarantorRelationshipOptions)}
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Bank Statement */}
-            <div className="space-y-4">
-              <Label className="text-sm font-medium text-slate-600">Bank Statement *</Label>
-              {formData.bank_statement_url ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-600" />
-                      <span className="text-sm text-slate-900">{formData.bank_statement_filename}</span>
+          {/* Document Uploads */}
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-teal-600" />
+                <span>Document Uploads</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Utility Bill */}
+                <div className="space-y-4">
+                  <Label className="text-sm font-medium text-slate-600">Utility Bill (Less than 3 months old) *</Label>
+                  {formData.utility_bill_url ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm text-slate-900">{formData.utility_bill_filename}</span>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.utility_bill_url, '_blank')}>
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.utility_bill_url, '_blank')}>
+                            <Download className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.bank_statement_url, '_blank')}>
-                        <Eye className="w-3 h-3" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.bank_statement_url, '_blank')}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
+                  ) : (
+                    <FileUpload
+                      label="Upload Utility Bill"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      maxSize={10}
+                      onFileSelect={(file) => file && handleDocumentUpload('utility_bill', file)}
+                      uploading={uploadingDocument === 'utility_bill'}
+                    />
+                  )}
                 </div>
-              ) : (
-                <FileUpload
-                  label="Upload Bank Statement"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  onFileSelect={(file) => file && handleDocumentUpload('bank_statement', file)}
-                  uploading={uploadingDocument === 'bank_statement'}
-                />
-              )}
-            </div>
 
-            {/* Passport */}
-            <div className="space-y-4">
-              <Label className="text-sm font-medium text-slate-600">Passport *</Label>
-              {formData.passport_url ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-600" />
-                      <span className="text-sm text-slate-900">{formData.passport_filename}</span>
+                {/* Identity Document */}
+                <div className="space-y-4">
+                  <Label className="text-sm font-medium text-slate-600">Driver's License / Passport / Birth Certificate *</Label>
+                  {formData.identity_document_url ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm text-slate-900">{formData.identity_document_filename}</span>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.identity_document_url, '_blank')}>
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.identity_document_url, '_blank')}>
+                            <Download className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.passport_url, '_blank')}>
-                        <Eye className="w-3 h-3" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.passport_url, '_blank')}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
+                  ) : (
+                    <FileUpload
+                      label="Upload Identity Document"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      maxSize={10}
+                      onFileSelect={(file) => file && handleDocumentUpload('identity_document', file)}
+                      uploading={uploadingDocument === 'identity_document'}
+                    />
+                  )}
                 </div>
-              ) : (
-                <FileUpload
-                  label="Upload Passport"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  onFileSelect={(file) => file && handleDocumentUpload('passport', file)}
-                  uploading={uploadingDocument === 'passport'}
-                />
-              )}
-            </div>
 
-            {/* Current Visa */}
-            <div className="space-y-4">
-              <Label className="text-sm font-medium text-slate-600">Current Visa *</Label>
-              {formData.current_visa_url ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-600" />
-                      <span className="text-sm text-slate-900">{formData.current_visa_filename}</span>
+                {/* Bank Statement */}
+                <div className="space-y-4">
+                  <Label className="text-sm font-medium text-slate-600">Bank Statement *</Label>
+                  {formData.bank_statement_url ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm text-slate-900">{formData.bank_statement_filename}</span>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.bank_statement_url, '_blank')}>
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.bank_statement_url, '_blank')}>
+                            <Download className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.current_visa_url, '_blank')}>
-                        <Eye className="w-3 h-3" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(formData.current_visa_url, '_blank')}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
+                  ) : (
+                    <FileUpload
+                      label="Upload Bank Statement"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      maxSize={10}
+                      onFileSelect={(file) => file && handleDocumentUpload('bank_statement', file)}
+                      uploading={uploadingDocument === 'bank_statement'}
+                    />
+                  )}
                 </div>
-              ) : (
-                <FileUpload
-                  label="Upload Current Visa"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  maxSize={10}
-                  onFileSelect={(file) => file && handleDocumentUpload('current_visa', file)}
-                  uploading={uploadingDocument === 'current_visa'}
-                />
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+
+                {/* Passport */}
+                <div className="space-y-4">
+                  <Label className="text-sm font-medium text-slate-600">Passport *</Label>
+                  {formData.passport_url ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm text-slate-900">{formData.passport_filename}</span>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.passport_url, '_blank')}>
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.passport_url, '_blank')}>
+                            <Download className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <FileUpload
+                      label="Upload Passport"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      maxSize={10}
+                      onFileSelect={(file) => file && handleDocumentUpload('passport', file)}
+                      uploading={uploadingDocument === 'passport'}
+                    />
+                  )}
+                </div>
+
+                {/* Current Visa */}
+                <div className="space-y-4">
+                  <Label className="text-sm font-medium text-slate-600">Current Visa *</Label>
+                  {formData.current_visa_url ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm text-slate-900">{formData.current_visa_filename}</span>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.current_visa_url, '_blank')}>
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.open(formData.current_visa_url, '_blank')}>
+                            <Download className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <FileUpload
+                      label="Upload Current Visa"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      maxSize={10}
+                      onFileSelect={(file) => file && handleDocumentUpload('current_visa', file)}
+                      uploading={uploadingDocument === 'current_visa'}
+                    />
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 };
