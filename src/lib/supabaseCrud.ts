@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { apiConfig } from '@/config/environment';
-import { validateLead, validateStudent, validateStudio, validateStudioUpdate, validateUser, sanitizeString, sanitizeEmail, sanitizePhone } from './validation';
+import { validateLead, validateStudent, validateStudio, validateStudioUpdate, validateUser, sanitizeString, sanitizeEmail, sanitizePhone, isValidEmail } from './validation';
 
 // Simple cache for frequently accessed data
 const cache = new Map();
@@ -158,6 +158,11 @@ export const getLeads = async () => {
 };
 
 export const createLead = async (lead) => {
+  // Validate email before processing
+  if (lead.email && !isValidEmail(lead.email)) {
+    throw new Error(`Invalid email address: ${lead.email}. Please use a valid email domain.`);
+  }
+
   // Normalize configuration values for case-insensitive matching
   const normalizedLead = {
     ...lead,
@@ -462,14 +467,14 @@ export const getRoomGrades = async () => {
   });
 };
 
-export const createRoomGrade = async (name, stock = 0) => {
+export const createRoomGrade = async (name, stock = 0, weekly_rate = 320) => {
   try {
-    const { data, error } = await supabase.from('room_grades').insert([{ name, stock }]).select();
+    const { data, error } = await supabase.from('room_grades').insert([{ name, stock, weekly_rate }]).select();
     if (error) throw error;
     return data[0];
   } catch (error: any) {
-    // If stock column doesn't exist, try without it
-    if (error.message?.includes('stock')) {
+    // If stock or weekly_rate column doesn't exist, try without them
+    if (error.message?.includes('stock') || error.message?.includes('weekly_rate')) {
       const { data, error: fallbackError } = await supabase.from('room_grades').insert([{ name }]).select();
       if (fallbackError) throw fallbackError;
       return data[0];
@@ -478,14 +483,14 @@ export const createRoomGrade = async (name, stock = 0) => {
   }
 };
 
-export const updateRoomGrade = async (id, name, stock) => {
+export const updateRoomGrade = async (id, name, stock, weekly_rate = 320) => {
   try {
-    const { data, error } = await supabase.from('room_grades').update({ name, stock }).eq('id', id).select();
+    const { data, error } = await supabase.from('room_grades').update({ name, stock, weekly_rate }).eq('id', id).select();
     if (error) throw error;
     return data[0];
   } catch (error: any) {
-    // If stock column doesn't exist, try without it
-    if (error.message?.includes('stock')) {
+    // If stock or weekly_rate column doesn't exist, try without them
+    if (error.message?.includes('stock') || error.message?.includes('weekly_rate')) {
       const { data, error: fallbackError } = await supabase.from('room_grades').update({ name }).eq('id', id).select();
       if (fallbackError) throw fallbackError;
       return data[0];
@@ -985,6 +990,8 @@ export const createStudentUserAccount = async (studentData) => {
 // Create student with user account link
 export const createStudentWithUserAccount = async (studentData) => {
   try {
+    console.log('🔍 createStudentWithUserAccount called with:', studentData);
+    
     // First create the user account
     const userAccount = await createStudentUserAccount(studentData);
     
@@ -992,34 +999,60 @@ export const createStudentWithUserAccount = async (studentData) => {
       throw new Error('Failed to create user account');
     }
 
-    // Then create the student record with user_id link
+    // Prepare student data with proper payment plan mapping
     const studentWithUserId = {
       ...studentData,
-      user_id: userAccount.user.id
+      user_id: userAccount.user.id,
+      // Ensure payment plan data is properly mapped
+      payment_plan_id: studentData.payment_plan_id ? parseInt(studentData.payment_plan_id) : null,
+      payment_cycles: studentData.payment_plan_id ? 
+        (studentData.payment_cycles || 
+         (studentData.payment_plan_id === 1 ? 3 : 
+          studentData.payment_plan_id === 2 ? 4 : 
+          studentData.payment_plan_id === 3 ? 10 : null)) : null,
+      duration_weeks: studentData.duration_weeks || 
+        (studentData.duration?.includes('45') ? 45 : 
+         studentData.duration?.includes('51') ? 51 : null),
+      deposit_paid: studentData.deposit_paid || false
     };
+
+    console.log('📝 Student data prepared:', studentWithUserId);
 
     const createdStudent = await createStudent(studentWithUserId);
     
-    // Automatically create application record with student data
+    if (!createdStudent) {
+      throw new Error('Failed to create student record');
+    }
+
+    console.log('✅ Student created:', createdStudent);
+    
+    // Automatically create comprehensive application record with ALL student data
     if (createdStudent) {
+      // Detect if this is a lead conversion based on presence of lead-specific data
+      const source = studentData.source || studentData.notes || studentData.dateofinquiry ? 'lead' : 'direct';
+      
+      console.log('🔍 Detected source:', source);
+      
+      // Use the mapping utility for perfect data consistency
       const applicationData = {
         user_id: userAccount.user.id,
-        first_name: studentData.name?.split(' ')[0] || '',
-        last_name: studentData.name?.split(' ').slice(1).join(' ') || '',
-        email: studentData.email || '',
-        mobile: studentData.phone || '',
-        deposit_paid: studentData.deposit_paid || false,
-        current_step: 1,
-        is_complete: false
+        ...(await mapStudentDataToApplication(studentData, source))
       };
 
+      console.log('📋 Application data prepared:', applicationData);
+
       try {
-        await createStudentApplication(applicationData);
+        const createdApplication = await createStudentApplication(applicationData);
+        console.log('✅ Application record created successfully:', createdApplication);
       } catch (appError) {
-        console.warn('Failed to create application record:', appError);
+        console.warn('⚠️ Failed to create application record:', appError);
         // Don't fail the entire operation if application creation fails
       }
     }
+    
+    // Clear cache to ensure fresh data
+    clearCache('students');
+    clearCache('student_applications');
     
     return {
       success: true,
@@ -1028,6 +1061,7 @@ export const createStudentWithUserAccount = async (studentData) => {
       defaultPassword: userAccount.defaultPassword
     };
   } catch (error) {
+    console.error('❌ createStudentWithUserAccount failed:', error);
     handleSupabaseError(error, 'Create student with user account');
   }
 };
@@ -1069,26 +1103,75 @@ export const updateStudentProfile = async (studentId, updates) => {
 // Get application options for dropdowns
 export const getApplicationOptions = async () => {
   try {
-    const [ethnicities, genders, countries, years, entries, installments] = await Promise.all([
-      supabase.from('ethnicity_options').select('*').order('sort_order'),
-      supabase.from('gender_options').select('*').order('sort_order'),
-      supabase.from('country_options').select('*').order('sort_order'),
-      supabase.from('year_of_study_options').select('*').order('sort_order'),
-      supabase.from('entry_uk_options').select('*').order('sort_order'),
-      supabase.from('payment_installment_options').select('*').order('sort_order')
-    ]);
+    // Get all options from the unified application_options table
+    const { data: allOptions, error } = await supabase
+      .from('application_options')
+      .select('*')
+      .eq('active', true)
+      .order('category')
+      .order('sort_order');
+
+    if (error) throw error;
+
+    // Group options by category
+    const optionsByCategory = allOptions.reduce((acc, option) => {
+      if (!acc[option.category]) {
+        acc[option.category] = [];
+      }
+      acc[option.category].push(option);
+      return acc;
+    }, {});
 
     return {
-      ethnicities: ethnicities.data || [],
-      genders: genders.data || [],
-      countries: countries.data || [],
-      years: years.data || [],
-      entries: entries.data || [],
-      installments: installments.data || []
+      ethnicities: optionsByCategory['ethnicity'] || [],
+      genders: optionsByCategory['gender'] || [],
+      countries: optionsByCategory['country'] || [],
+      years: optionsByCategory['year_of_study'] || [],
+      entries: optionsByCategory['entry_uk'] || [],
+      installments: optionsByCategory['payment_installment'] || []
     };
   } catch (error) {
     handleSupabaseError(error, 'Get application options');
   }
+};
+
+// Get application options by category using the RPC function
+export const getApplicationOptionsByCategory = async (category: string) => {
+  try {
+    const { data, error } = await supabase
+      .rpc('get_application_options', { category_name: category });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    handleSupabaseError(error, `Get application options for category: ${category}`);
+    return [];
+  }
+};
+
+// Helper functions for specific categories
+export const getEthnicityOptions = async () => {
+  return await getApplicationOptionsByCategory('ethnicity');
+};
+
+export const getGenderOptions = async () => {
+  return await getApplicationOptionsByCategory('gender');
+};
+
+export const getCountryOptions = async () => {
+  return await getApplicationOptionsByCategory('country');
+};
+
+export const getYearOfStudyOptions = async () => {
+  return await getApplicationOptionsByCategory('year_of_study');
+};
+
+export const getEntryUKOptions = async () => {
+  return await getApplicationOptionsByCategory('entry_uk');
+};
+
+export const getPaymentInstallmentOptions = async () => {
+  return await getApplicationOptionsByCategory('payment_installment');
 };
 
 // Get student application
@@ -1110,16 +1193,24 @@ export const getStudentApplication = async (userId) => {
 // Create student application
 export const createStudentApplication = async (applicationData) => {
   try {
+    console.log('📝 Creating student application with data:', applicationData);
+    
     const { data, error } = await supabase
       .from('student_applications')
       .insert([applicationData])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error creating student application:', error);
+      throw error;
+    }
+    
+    console.log('✅ Student application created successfully:', data);
     clearCache('student_applications');
     return data;
   } catch (error) {
+    console.error('❌ createStudentApplication failed:', error);
     handleSupabaseError(error, 'Create student application');
   }
 };
@@ -2621,5 +2712,209 @@ export const completeCleaningTask = async (scheduleId: number, notes?: string) =
     return data;
   } catch (error) {
     handleSupabaseError(error, 'Complete cleaning task');
+  }
+};
+
+// Data Mapping Utility for Perfect Consistency
+const mapStudentDataToApplication = async (studentData: any, source: 'lead' | 'direct' | 'conversion' = 'direct') => {
+  console.log('🔍 mapStudentDataToApplication called with:', { studentData, source });
+  
+  // Use full name instead of splitting
+  const fullName = studentData.name || '';
+  console.log('📝 Full name:', fullName);
+  
+  // Calculate age from birthday if provided
+  const calculateAge = (birthday: string) => {
+    if (!birthday) return 0;
+    const today = new Date();
+    const birthDate = new Date(birthday);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Get payment plan name if payment_plan_id is provided
+  let paymentPlanName = '';
+  if (studentData.payment_plan_id) {
+    try {
+      console.log('💳 Fetching payment plan name for ID:', studentData.payment_plan_id);
+      const { data: paymentPlan } = await supabase
+        .from('payment_plans')
+        .select('name')
+        .eq('id', studentData.payment_plan_id)
+        .single();
+      paymentPlanName = paymentPlan?.name || '';
+      console.log('💳 Payment plan name:', paymentPlanName);
+    } catch (error) {
+      console.warn('Failed to fetch payment plan name:', error);
+    }
+  }
+
+  // Map data based on source
+  const mappedData: any = {
+    // Personal Information (mapped from student data) - Use full names
+    first_name: fullName, // Store full name in first_name field
+    last_name: '', // Keep empty for full name approach
+    email: studentData.email || '',
+    mobile: studentData.phone || '',
+    birthday: studentData.birthday || '',
+    age: studentData.age || calculateAge(studentData.birthday || ''),
+    ethnicity: studentData.ethnicity || '',
+    gender: studentData.gender || '',
+    ucas_id: studentData.ucas_id || '',
+    country: studentData.country || '',
+    
+    // Contact Information (mapped from student data)
+    address_line_1: studentData.address_line_1 || '',
+    address_line_2: studentData.address_line_2 || '',
+    post_code: studentData.post_code || '',
+    town: studentData.town || '',
+    
+    // Academic Information (mapped from student data)
+    year_of_study: studentData.year_of_study || '',
+    field_of_study: studentData.field_of_study || '',
+    
+    // Additional Information (mapped from student data)
+    is_disabled: studentData.is_disabled || false,
+    is_smoker: studentData.is_smoker || false,
+    medical_requirements: studentData.medical_requirements || '',
+    entry_into_uk: studentData.entry_into_uk || '',
+    
+    // Payment Information (mapped from student data) - Include payment plan name
+    wants_installments: studentData.wants_installments || false,
+    selected_installment_plan: paymentPlanName || studentData.selected_installment_plan || '',
+    payment_installments: studentData.payment_installments || '',
+    data_consent: studentData.data_consent || false,
+    deposit_paid: studentData.deposit_paid || false,
+    
+    // Guarantor Information (mapped from student data)
+    guarantor_name: studentData.guarantor_name || '',
+    guarantor_email: studentData.guarantor_email || '',
+    guarantor_phone: studentData.guarantor_phone || '',
+    guarantor_date_of_birth: studentData.guarantor_date_of_birth || '',
+    guarantor_relationship: studentData.guarantor_relationship || '',
+    
+    // Document Uploads (mapped from student data)
+    utility_bill_url: studentData.utility_bill_url || '',
+    utility_bill_filename: studentData.utility_bill_filename || '',
+    identity_document_url: studentData.identity_document_url || '',
+    identity_document_filename: studentData.identity_document_filename || '',
+    bank_statement_url: studentData.bank_statement_url || '',
+    bank_statement_filename: studentData.bank_statement_filename || '',
+    passport_url: studentData.passport_url || '',
+    passport_filename: studentData.passport_filename || '',
+    current_visa_url: studentData.current_visa_url || '',
+    current_visa_filename: studentData.current_visa_filename || '',
+    
+    // Application metadata
+    current_step: 1,
+    is_complete: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  // Source-specific mappings
+  if (source === 'lead') {
+    // Additional lead-specific mappings
+    mappedData['source'] = studentData.source || '';
+    mappedData['lead_notes'] = studentData.notes || '';
+    mappedData['date_of_inquiry'] = studentData.dateofinquiry || '';
+    console.log('📋 Lead-specific data mapped:', {
+      source: mappedData['source'],
+      lead_notes: mappedData['lead_notes'],
+      date_of_inquiry: mappedData['date_of_inquiry']
+    });
+  }
+
+  console.log('✅ Final mapped data:', mappedData);
+  return mappedData;
+};
+
+// Enhanced profile completion calculation based on student_applications table
+export const calculateProfileCompletion = async (userId: string) => {
+  try {
+    const { data: application, error } = await supabase
+      .from('student_applications')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (error || !application) {
+      return 0;
+    }
+
+    // Define all required fields for profile completion
+    const requiredFields = [
+      'first_name', 'birthday', 'age', 'ethnicity', 'gender', 'ucas_id', 'country',
+      'email', 'mobile', 'address_line_1', 'address_line_2', 'post_code', 'town',
+      'year_of_study', 'field_of_study', 'medical_requirements', 'entry_into_uk',
+      'payment_installments', 'guarantor_name', 'guarantor_email', 'guarantor_phone',
+      'guarantor_date_of_birth', 'guarantor_relationship'
+    ];
+    
+    // Count filled fields
+    const filledFields = requiredFields.filter(field => {
+      const value = application[field];
+      return value !== null && value !== undefined && value !== '' && value !== 0;
+    }).length;
+    
+    // Calculate document completion (5 documents, 6% each = 30% total)
+    const documents = [
+      application.utility_bill_url,
+      application.identity_document_url,
+      application.bank_statement_url,
+      application.passport_url,
+      application.current_visa_url
+    ].filter(Boolean);
+    
+    const documentCompletion = Math.min(documents.length * 6, 30);
+    const fieldCompletion = (filledFields / requiredFields.length) * 70;
+    
+    return Math.min(Math.round(fieldCompletion + documentCompletion), 100);
+  } catch (error) {
+    console.error('Error calculating profile completion:', error);
+    return 0;
+  }
+};
+
+// Test function to verify data mapping and database insertion
+export const testDataMapping = async () => {
+  try {
+    console.log('🧪 Testing data mapping...');
+    
+    // Test data
+    const testStudentData = {
+      name: 'John Doe',
+      phone: '1234567890',
+      email: 'john@test.com',
+      payment_plan_id: 1,
+      source: 'Website',
+      notes: 'Test lead conversion',
+      dateofinquiry: '2024-01-01'
+    };
+    
+    console.log('📋 Test student data:', testStudentData);
+    
+    // Test mapping function
+    const mappedData = await mapStudentDataToApplication(testStudentData, 'lead');
+    console.log('✅ Mapped data:', mappedData);
+    
+    // Test database insertion (without user_id for now)
+    const testApplicationData = {
+      user_id: 'test-user-id',
+      ...mappedData
+    };
+    
+    console.log('📝 Testing database insertion...');
+    const result = await createStudentApplication(testApplicationData);
+    console.log('✅ Database insertion result:', result);
+    
+    return { success: true, mappedData, result };
+  } catch (error) {
+    console.error('❌ Test failed:', error);
+    return { success: false, error };
   }
 };

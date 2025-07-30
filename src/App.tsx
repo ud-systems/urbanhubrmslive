@@ -40,22 +40,39 @@ import ReferralLeads from "./pages/ReferralLeads";
 import GenericSourceLeads from "./pages/GenericSourceLeads";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+});
 
 // Auto-fix authentication errors and suppress non-critical console noise
 autoFixAuthErrors();
 suppressNonCriticalErrors();
 
-const App = () => (
-  <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          {/* Temporarily disabled to prevent blank screen issues */}
-          {/* <SafeSystemStandardization /> */}
-          <BrowserRouter>
+const App = () => {
+  // Check if we're in a browser environment
+  if (typeof window === 'undefined') {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            {/* Temporarily disabled to prevent blank screen issues */}
+            {/* <SafeSystemStandardization /> */}
+            <BrowserRouter>
             <Routes>
               <Route path="/signin" element={<SignIn />} />
               <Route path="/signup" element={<SignUp />} />
@@ -187,6 +204,7 @@ const App = () => (
       </AuthProvider>
     </QueryClientProvider>
   </ErrorBoundary>
-);
+  );
+};
 
 export default App;

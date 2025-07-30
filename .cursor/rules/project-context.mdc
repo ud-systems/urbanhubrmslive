@@ -1,0 +1,49 @@
+# URBAN HUB LEAD MANAGEMENT SYSTEM - PROJECT CONTEXT
+
+## PROJECT OVERVIEW
+This is a comprehensive lead management system for Urban Hub with the following key modules:
+- Lead Management (Hot, Cold, Dead, Converted leads)
+- Student Management & Applications
+- Studio Management
+- Tourist Management
+- Finance & Payment Processing
+- Maintenance & Cleaning
+- Analytics & Reporting
+
+## CURRENT SYSTEM STATE
+- Built with React + TypeScript + Vite
+- Uses Supabase for database and authentication
+- Tailwind CSS for styling with shadcn/ui components
+- Mobile-first responsive design
+- Live database integration (no mock data)
+
+## CRITICAL REMINDERS
+- This is a production system - always use live data
+- Mobile responsiveness is paramount (10-12px fonts, 14-18px titles)
+- All CRUD operations must work with real database
+- UI/UX consistency across all modules is essential
+- Back buttons must be positioned on the far right
+- Dialog boxes need 2 close buttons and minimal padding
+- Form validations are mandatory for all inputs
+
+## TECHNICAL STACK
+- Frontend: React 18, TypeScript, Vite
+- Styling: Tailwind CSS, shadcn/ui
+- Database: Supabase (PostgreSQL)
+- Authentication: Supabase Auth
+- Payments: Stripe integration
+- State Management: React Context + hooks
+- File Handling: Supabase Storage
+
+## DEVELOPMENT WORKFLOW
+1. Always assess database schema first
+2. Build on existing components and layouts
+3. Ensure mobile responsiveness
+4. Test CRUD operations with live data
+5. Validate form inputs and user flows
+6. Check intermodule communication
+7. Verify no broken links or permissions
+description:
+globs:
+alwaysApply: false
+---

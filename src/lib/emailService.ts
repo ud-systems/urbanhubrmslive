@@ -23,6 +23,23 @@ class EmailService {
     this.initializeTemplates();
   }
 
+  private static isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidDomains = [
+      '@email.com', 
+      '@student.ac.uk', 
+      '@tourist.com', 
+      '@test.com', 
+      '@example.com',
+      '@placeholder.com'
+    ];
+    
+    if (!emailRegex.test(email)) return false;
+    if (invalidDomains.some(domain => email.includes(domain))) return false;
+    
+    return true;
+  }
+
   private initializeTemplates() {
     // Default email templates
     const defaultTemplates: EmailTemplate[] = [
@@ -121,6 +138,12 @@ class EmailService {
 
   async sendEmail(emailData: EmailData): Promise<boolean> {
     try {
+      // Validate email before sending
+      if (!EmailService.isValidEmail(emailData.to)) {
+        console.warn('⚠️ Invalid email address, skipping send:', emailData.to);
+        return false;
+      }
+
       // Use Supabase Edge Function for email sending
       const { data, error } = await supabase.functions.invoke('send-email', {
         body: {

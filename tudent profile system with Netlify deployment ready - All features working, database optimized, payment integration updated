@@ -1,0 +1,208 @@
+[1mdiff --git a/.cursor/rules/README.md b/.cursor/rules/README.md[m
+[1mnew file mode 100644[m
+[1mindex 0000000..ce6734e[m
+[1m--- /dev/null[m
+[1m+++ b/.cursor/rules/README.md[m
+[36m@@ -0,0 +1,71 @@[m
+[32m+[m[32m# Cursor Rules for Urban Hub Lead Management System[m
+[32m+[m
+[32m+[m[32m## Overview[m
+[32m+[m[32mThis directory contains Cursor rules that ensure consistent development standards and practices across the Urban Hub Lead Management System.[m
+[32m+[m
+[32m+[m[32m## Files[m
+[32m+[m
+[32m+[m[32m### `uhrmsrules.mdc`[m
+[32m+[m[32m**Main development rules** - Contains all the core development principles, UI/UX standards, and quality assurance requirements.[m
+[32m+[m
+[32m+[m[32m**Key sections:**[m
+[32m+[m[32m- Core Development Principles[m
+[32m+[m[32m- Database & Data Management[m
+[32m+[m[32m- UI/UX Standards[m
+[32m+[m[32m- Quality Assurance[m
+[32m+[m
+[32m+[m[32m### `project-context.mdc`[m
+[32m+[m[32m**Project-specific context** - Provides essential information about the current system state, technical stack, and development workflow.[m
+[32m+[m
+[32m+[m[32m**Key sections:**[m
+[32m+[m[32m- Project Overview[m
+[32m+[m[32m- Current System State[m
+[32m+[m[32m- Critical Reminders[m
+[32m+[m[32m- Technical Stack[m
+[32m+[m[32m- Development Workflow[m
+[32m+[m
+[32m+[m[32m## How Rules Work[m
+[32m+[m
+[32m+[m[32m1. **Automatic Application**: Rules with `alwaysApply: true` are automatically applied to every interaction[m
+[32m+[m[32m2. **Context Awareness**: The system maintains awareness of your project's specific requirements[m
+[32m+[m[32m3. **Consistent Standards**: All development follows the established patterns and standards[m
+[32m+[m[32m4. **Quality Assurance**: Built-in checks ensure code quality and system integrity[m
+[32m+[m
+[32m+[m[32m## Rule Categories[m
+[32m+[m
+[32m+[m[32m### Development Principles[m
+[32m+[m[32m- Problem-solving approach[m
+[32m+[m[32m- Code architecture standards[m
+[32m+[m[32m- Dependency management[m
+[32m+[m
+[32m+[m[32m### Database & Data[m
+[32m+[m[32m- Live data requirements[m
+[32m+[m[32m- CRUD functionality standards[m
+[32m+[m[32m- No mock data policy[m
+[32m+[m
+[32m+[m[32m### UI/UX Standards[m
+[32m+[m[32m- Mobile responsiveness (10-12px fonts, 14-18px titles)[m
+[32m+[m[32m- Dialog and form standards[m
+[32m+[m[32m- Navigation patterns[m
+[32m+[m[32m- Layout consistency[m
+[32m+[m
+[32m+[m[32m### Quality Assurance[m
+[32m+[m[32m- System integrity checks[m
+[32m+[m[32m- Validation requirements[m
+[32m+[m[32m- Testing standards[m
+[32m+[m
+[32m+[m[32m## Benefits[m
+[32m+[m
+[32m+[m[32m✅ **Consistent Development**: All code follows the same standards[m
+[32m+[m[32m✅ **Quality Assurance**: Built-in checks prevent common issues[m
+[32m+[m[32m✅ **Mobile-First**: Responsive design is always prioritized[m
+[32m+[m[32m✅ **Live Data**: No mock data, always production-ready[m
+[32m+[m[32m✅ **User Experience**: Consistent UI/UX across all modules[m
+[32m+[m[32m✅ **System Integrity**: Proper CRUD operations and intermodule communication[m
+[32m+[m
+[32m+[m[32m## Maintenance[m
+[32m+[m
+[32m+[m[32m- Rules are automatically applied to every Cursor interaction[m
+[32m+[m[32m- No manual intervention required[m
+[32m+[m[32m- Rules persist across sessions and workspace restarts[m
+[32m+[m[32m- Updates to rules take effect immediately[m[41m [m
+\ No newline at end of file[m
+[1mdiff --git a/.cursor/rules/RULE_MANAGEMENT_GUIDE.md b/.cursor/rules/RULE_MANAGEMENT_GUIDE.md[m
+[1mnew file mode 100644[m
+[1mindex 0000000..ab8e6f5[m
+[1m--- /dev/null[m
+[1m+++ b/.cursor/rules/RULE_MANAGEMENT_GUIDE.md[m
+[36m@@ -0,0 +1,175 @@[m
+[32m+[m[32m# Rule Management Guide[m
+[32m+[m
+[32m+[m[32m## Quick Start[m
+[32m+[m
+[32m+[m[32m### Option 1: Interactive Management (Recommended)[m
+[32m+[m[32m```bash[m
+[32m+[m[32mnode scripts/manageRules.js[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m### Option 2: Direct File Editing[m
+[32m+[m[32mEdit `.cursor/rules/uhrmsrules.mdc` directly in your editor.[m
+[32m+[m
+[32m+[m[32m## Rule Structure[m
+[32m+[m
+[32m+[m[32m### File Organization[m
+[32m+[m[32m```[m
+[32m+[m[32m.cursor/rules/[m
+[32m+[m[32m├── uhrmsrules.mdc          # Main development rules (alwaysApply: true)[m
+[32m+[m[32m├── project-context.mdc     # Project-specific context[m
+[32m+[m[32m├── README.md              # Documentation[m
+[32m+[m[32m└── RULE_MANAGEMENT_GUIDE.md # This file[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m### Rule Format[m
+[32m+[m[32m```markdown[m
+[32m+[m[32m---[m
+[32m+[m[32malwaysApply: true[m
+[32m+[m[32m---[m
+[32m+[m
+[32m+[m[32m# MAIN TITLE[m
+[32m+[m
+[32m+[m[32m## SECTION[m
+[32m+[m
+[32m+[m[32m### Category[m
+[32m+[m[32m- Rule 1[m
+[32m+[m[32m- Rule 2[m
+[32m+[m[32m- Rule 3[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m## Adding New Rules[m
+[32m+[m
+[32m+[m[32m### Method 1: Interactive Script[m
+[32m+[m[32m1. Run `node scripts/manageRules.js`[m
+[32m+[m[32m2. Choose option 2 (Add new rule)[m
+[32m+[m[32m3. Select existing category or create new one[m
+[32m+[m[32m4. Enter your rule[m
+[32m+[m
+[32m+[m[32m### Method 2: Direct Editing[m
+[32m+[m[32m1. Open `.cursor/rules/uhrmsrules.mdc`[m
+[32m+[m[32m2. Find appropriate section[m
+[32m+[m[32m3. Add rule under relevant category[m
+[32m+[m[32m4. Save file[m
+[32m+[m
+[32m+[m[32m## Rule Categories[m
+[32m+[m
+[32m+[m[32m### Current Categories:[m
+[32m+[m[32m- **Core Development Principles**[m
+[32m+[m[32m  - Dependency Management[m
+[32m+[m[32m  - Problem Solving Approach[m
+[32m+[m[32m  - Code Architecture[m
+[32m+[m
+[32m+[m[32m- **Database & Data Management**[m
+[32m+[m[32m  - Live Data Requirements[m
+[32m+[m[32m  - CRUD Functionality[m
+[32m+[m
+[32m+[m[32m- **UI/UX Standards**[m
+[32m+[m[32m  - Mobile Responsiveness[m
+[32m+[m[32m  - Typography & Sizing[m
+[32m+[m[32m  - Dialog & Form Standards[m
+[32m+[m[32m  - Navigation & Layout[m
+[32m+[m
+[32m+[m[32m- **Quality Assurance**[m
+[32m+[m[32m  - System Integrity[m
+[32m+[m[32m  - Validation & Testing[m
+[32m+[m
+[32m+[m[32m## Best Practices[m
+[32m+[m
+[32m+[m[32m### Writing Effective Rules[m
+[32m+[m[32m- Be specific and actionable[m
+[32m+[m[32m- Use clear, concise language[m
+[32m+[m[32m- Include examples when helpful[m
+[32m+[m[32m- Group related rules together[m
+[32m+[m
+[32m+[m[32m### Rule Examples[m
+[32m+[m[32m✅ **Good:**[m
+[32m+[m[32m```[m
+[32m+[m[32m- Always use 10-12px font sizes for body text on mobile[m
+[32m+[m[32m- Ensure all forms have validation before submission[m
+[32m+[m[32m- Back buttons must be positioned on the far right[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m❌ **Avoid:**[m
+[32m+[m[32m```[m
+[32m+[m[32m- Make it look good[m
+[32m+[m[32m- Don't break things[m
+[32m+[m[32m- Be careful with the code[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m## Verification[m
+[32m+[m
+[32m+[m[32m### Check Rules Status[m
+[32m+[m[32m```bash[m
+[32m+[m[32mnode scripts/verifyRules.js[m
+[32m+[m[32m```[m
+[32m+[m
+[32m+[m[32m### What Gets Verified:[m
+[32m+[m[32m- ✅ Rules directory exists[m
+[32m+[m[32m- ✅ Main rules file has `alwaysApply: true`[m
+[32m+[m[32m- ✅ All required files are present[m
+[32m+[m[32m- ✅ File sizes are reasonable[m
+[32m+[m
+[32m+[m[32m## Troubleshooting[m
+[32m+[m
+[32m+[m[32m### Rules Not Applying[m
+[32m+[m[32m1. Check if `alwaysApply: true` is in the frontmatter[m
+[32m+[m[32m2. Verify file is saved in `.cursor/rules/` directory[m
+[32m+[m[32m3. Restart Cursor if needed[m
+[32m+[m[32m4. Run verification script[m
+[32m+[m
+[32m+[m[32m### Adding Complex Rules[m
+[32m+[m[32mFor complex rules with multiple conditions, use this format:[m
+[32m+[m[32m```markdown[m
+[32m+[m[32m### Complex Category[m
+[32m+[m[32

@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { authRateLimiter } from '../lib/rateLimiter';
 import type { Session } from '@supabase/supabase-js';
+import { statePersistence } from '../lib/statePersistence';
 
 interface User {
   id: string;
@@ -99,19 +100,57 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       resetTime: Date.now() + 60000
   });
 
+  // Enhanced user state setter with persistence
+  const setUserWithPersistence = useCallback((newUser: User | null) => {
+    setUser(newUser);
+    
+    try {
+      // Save user state to persistence layer
+      if (newUser) {
+        statePersistence.saveState({
+          user: {
+            id: newUser.id,
+            name: newUser.name,
+            email: newUser.email,
+            role: newUser.role,
+            avatar: newUser.avatar
+          }
+        }, { key: 'urbanhub-auth-state' });
+      } else {
+        statePersistence.clearState('urbanhub-auth-state');
+      }
+    } catch (error) {
+      console.warn('Failed to persist user state:', error);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
     const initAuth = async () => {
       try {
+        // First, try to restore user state from persistence
+        try {
+          const savedAuthState = statePersistence.loadState({ key: 'urbanhub-auth-state' });
+          if (savedAuthState?.user && !statePersistence.isStateStale('urbanhub-auth-state')) {
+            console.log('🔄 Restoring user state from persistence:', savedAuthState.user);
+            setUser(savedAuthState.user);
+            setLoading(false);
+            setInitializing(false);
+          }
+        } catch (error) {
+          console.warn('Failed to restore user state from persistence:', error);
+        }
+
+        // Then check for active session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
           console.error('Error getting session:', sessionError);
           if (mounted) {
-            setUser(null);
+            setUserWithPersistence(null);
             setLoading(false);
-            setInitializing(false); // Auth initialization complete
+            setInitializing(false);
           }
           return;
         }
@@ -131,17 +170,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               };
               
               if (mounted) {
-                setUser(user);
+                setUserWithPersistence(user);
                 setLoading(false);
-                setInitializing(false); // Auth initialization complete
+                setInitializing(false);
               }
             } else {
               console.warn('User not approved or not found in database, clearing session...');
               await supabase.auth.signOut();
               if (mounted) {
-                setUser(null);
+                setUserWithPersistence(null);
                 setLoading(false);
-                setInitializing(false); // Auth initialization complete
+                setInitializing(false);
               }
             }
           } catch (profileError) {
@@ -156,24 +195,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             };
             
             if (mounted) {
-              setUser(user);
+              setUserWithPersistence(user);
               setLoading(false);
-              setInitializing(false); // Auth initialization complete
+              setInitializing(false);
             }
           }
         } else {
           if (mounted) {
-            setUser(null);
+            setUserWithPersistence(null);
             setLoading(false);
-            setInitializing(false); // Auth initialization complete
+            setInitializing(false);
           }
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
         if (mounted) {
-          setUser(null);
+          setUserWithPersistence(null);
           setLoading(false);
-          setInitializing(false); // Auth initialization complete
+          setInitializing(false);
         }
       }
     };
@@ -182,10 +221,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       (event, session) => {
         if (mounted) {
           if (event === 'SIGNED_OUT') {
-            setUser(null);
+            setUserWithPersistence(null);
           } else {
             // For all other events, use simple mapping (don't re-validate on every change)
-            setUser(mapSessionToUser(session));
+            setUserWithPersistence(mapSessionToUser(session));
           }
           setLoading(false);
         }
@@ -238,7 +277,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setUser(null);
           throw new Error('Your account is pending admin approval. Please contact an administrator.');
         }
-        setUser({
+        setUserWithPersistence({
           id: data.user.id,
           name: profile.name || '',
           email: data.user.email || '',
@@ -292,7 +331,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           approved: true, // Auto-approve for now, can be changed to false for manual approval
           approved_at: new Date().toISOString()
         }], { onConflict: 'id' });
-        setUser({
+        setUserWithPersistence({
           id: data.user.id,
           name,
           email,
@@ -321,10 +360,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (error) {
         console.error('Logout error:', error);
       }
-      setUser(null);
+      setUserWithPersistence(null);
+      // Clear all app state on logout
+      statePersistence.clearAllState();
     } catch (error) {
       console.error('Logout error:', error);
-      setUser(null);
+      setUserWithPersistence(null);
     } finally {
       setLoading(false);
     }
@@ -343,7 +384,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (userData.name) {
         await supabase.from('users').update({ name: userData.name }).eq('id', user.id);
       }
-      setUser({ ...user, ...userData });
+      setUserWithPersistence({ ...user, ...userData });
     } finally {
       setLoading(false);
     }

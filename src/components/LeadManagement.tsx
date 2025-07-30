@@ -1102,6 +1102,7 @@ const LeadManagement = ({
         onConvert={onConvertLead}
         studios={studios}
         studioViews={studioViews}
+        roomGrades={roomGrades}
       />
 
       <BulkEditModal

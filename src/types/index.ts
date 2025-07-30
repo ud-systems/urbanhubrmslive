@@ -506,6 +506,16 @@ export interface AuditTrailEntry {
 }
 
 // Student Application types (updated with deposit_paid)
+// Application Options - Unified table for all dropdown options
+export interface ApplicationOption {
+  id: number;
+  category: string;
+  name: string;
+  sort_order: number;
+  active: boolean;
+  created_at?: string;
+}
+
 export interface StudentApplication {
   id: number;
   user_id: string;

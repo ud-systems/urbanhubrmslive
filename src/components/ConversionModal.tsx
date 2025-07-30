@@ -33,9 +33,10 @@ interface ConversionModalProps {
   onConvert: (studentData: any) => void;
   studios: Studio[];
   studioViews: any[];
+  roomGrades: any[];
 }
 
-const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioViews }: ConversionModalProps) => {
+const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioViews, roomGrades }: ConversionModalProps) => {
   const [durationType, setDurationType] = useState<string>("");
   const [checkInDate, setCheckInDate] = useState("");
   const [checkOutDate, setCheckOutDate] = useState("");
@@ -68,6 +69,13 @@ const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioView
       setSelectedPaymentPlan("");
     }
   }, [isOpen]);
+
+  // Auto-calculate revenue when rates or duration changes
+  useEffect(() => {
+    if (durationType && (weeklyRate > 0 || dailyRate > 0)) {
+      calculateRevenue();
+    }
+  }, [durationType, weeklyRate, dailyRate, checkInDate, checkOutDate, customWeeks]);
 
   const calculateRevenue = () => {
     if (durationType === "short" && checkInDate && checkOutDate) {
@@ -107,7 +115,11 @@ const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioView
       revenue: totalRevenue || 0,
       duration_weeks: durationType === "45-weeks" ? 45 : durationType === "51-weeks" ? 51 : durationType === "custom" ? parseInt(customWeeks) : null,
       payment_cycles: selectedPaymentPlan ? parseInt(selectedPaymentPlan) : null,
-      payment_plan_id: selectedPaymentPlan ? parseInt(selectedPaymentPlan) : null
+      payment_plan_id: selectedPaymentPlan ? parseInt(selectedPaymentPlan) : null,
+      // Add lead-specific data for perfect mapping
+      source: lead?.source || '',
+      notes: lead?.notes || '',
+      dateofinquiry: lead?.dateofinquiry || ''
     };
     
     console.log('ConversionModal: conversionData prepared:', conversionData);
@@ -209,6 +221,15 @@ const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioView
                           console.log('Studio selected:', studio);
                           setSelectedStudio(studio.id);
                           setStudioSearchTerm(studio.name);
+                          
+                          // Auto-set weekly rate based on room grade if available
+                          if (studio.roomGrade) {
+                            // Find the room grade and get its default weekly rate
+                            const roomGradeData = roomGrades.find(rg => rg.name === studio.roomGrade);
+                            if (roomGradeData && roomGradeData.weekly_rate) {
+                              setWeeklyRate(roomGradeData.weekly_rate);
+                            }
+                          }
                         }}
                         className="p-3 hover:bg-slate-50 cursor-pointer border-b last:border-b-0"
                       >
@@ -345,11 +366,7 @@ const ConversionModal = ({ lead, isOpen, onClose, onConvert, studios, studioView
             )}
           </div>
 
-          {/* Calculate Button */}
-          <Button onClick={calculateRevenue} variant="outline" className="w-full">
-            <DollarSign className="w-4 h-4 mr-2" />
-            Calculate Total Revenue
-          </Button>
+          {/* Revenue is calculated automatically */}
 
           {/* Conversion Type Indicator */}
           {durationType && (

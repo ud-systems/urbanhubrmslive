@@ -19,6 +19,7 @@ import LeadDetailsModal from "@/components/LeadDetailsModal";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLeads, getStudents, getTourists, getStudios, createLead, updateLead, deleteLead, createStudent, updateStudent, deleteStudent, createTourist, updateTourist, deleteTourist, bulkDeleteTourists, createStudio, updateStudio, deleteStudio, getRoomGrades, getStayDurations, getLeadSources, getUsers, getLeadStatus, getFollowUpStages, getResponseCategories, getStudioViews, debugStudentsSchema, debugStudiosSchema, createStudentUserAccount, createStudentWithUserAccount, createStudentInvoice, createTouristInvoice } from "@/lib/supabaseCrud";
+import { useRoutePersistence } from "@/hooks/useStatePersistence";
 import { addDays, startOfDay, startOfWeek, startOfMonth, startOfYear, isAfter, isBefore, isEqual } from 'date-fns';
 import { logWarn, logError, logInfo } from '@/lib/logger';
 import { Calendar } from "@/components/ui/calendar";
@@ -36,6 +37,7 @@ const Index = () => {
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false);
 
   const { user } = useAuth();
+  const { saveRouteState, loadRouteState } = useRoutePersistence();
   
   // Get current tab from URL or default to dashboard
   const getCurrentTab = () => {
@@ -57,6 +59,36 @@ const Index = () => {
   useEffect(() => {
     setCurrentTab(getCurrentTab());
   }, [location.search]);
+
+  // State persistence for route and tab
+  useEffect(() => {
+    // Save current route state
+    saveRouteState(location.pathname + location.search, currentTab);
+  }, [location.pathname, location.search, currentTab, saveRouteState]);
+
+  // Restore state on component mount
+  useEffect(() => {
+    const savedState = loadRouteState();
+    if (savedState?.currentTab && savedState.currentTab !== currentTab) {
+      console.log('🔄 Restoring tab state:', savedState.currentTab);
+      handleTabChange(savedState.currentTab);
+    }
+  }, [loadRouteState, currentTab]);
+
+  // Listen for state restoration events
+  useEffect(() => {
+    const handleStateRestored = (event: CustomEvent) => {
+      if (event.detail?.currentTab && event.detail.currentTab !== currentTab) {
+        console.log('🎯 State restored, updating tab:', event.detail.currentTab);
+        handleTabChange(event.detail.currentTab);
+      }
+    };
+
+    window.addEventListener('stateRestored', handleStateRestored as EventListener);
+    return () => {
+      window.removeEventListener('stateRestored', handleStateRestored as EventListener);
+    };
+  }, [currentTab]);
 
   // Remove hardcoded user data - use actual authenticated user
 
@@ -294,7 +326,11 @@ const Index = () => {
           revenue: conversionData.revenue,
           duration_weeks: conversionData.duration_weeks,
           payment_cycles: conversionData.payment_cycles,
-          payment_plan_id: conversionData.payment_plan_id
+          payment_plan_id: conversionData.payment_plan_id,
+          // Add lead-specific data for perfect mapping
+          source: conversionData.source || '',
+          notes: conversionData.notes || '',
+          dateofinquiry: conversionData.dateofinquiry || ''
         };
 
         // Create student with user account link
@@ -620,19 +656,15 @@ const Index = () => {
 
   const handleAddStudent = async (newStudent: any) => {
     try {
-      // Create student with user account link
-      const result = await createStudentWithUserAccount(newStudent);
-      
-      if (!result?.success) {
-        throw new Error('Failed to create student with user account');
-      }
+      // The student has already been created in the StudentManagement component
+      // Just refresh the data to show the new student
       
       // Update studio occupancy if studio is assigned
       if (newStudent.assignedto) {
         try {
           await updateStudio(newStudent.assignedto, { 
             occupied: true, 
-            occupiedby: result.student.id 
+            occupiedby: newStudent.id 
           });
           // Refresh studios data to show updated occupancy
           const updatedStudios = await getStudios();

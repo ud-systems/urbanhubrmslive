@@ -158,6 +158,25 @@ export const sanitizeEmail = (email: string): string => {
 };
 
 export const sanitizePhone = (phone: string): string => {
-  if (typeof phone !== 'string') return '';
-  return phone.replace(/[^\d\s\-+()]/g, ''); // Keep only digits, spaces, and phone symbols
+  return phone.replace(/[^\d+\-\(\)\s]/g, '').trim();
+};
+
+// Email validation function to prevent bounces
+export const isValidEmail = (email: string): boolean => {
+  if (!email) return false;
+  
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const invalidDomains = [
+    '@email.com', 
+    '@student.ac.uk', 
+    '@tourist.com', 
+    '@test.com', 
+    '@example.com',
+    '@placeholder.com'
+  ];
+  
+  if (!emailRegex.test(email)) return false;
+  if (invalidDomains.some(domain => email.includes(domain))) return false;
+  
+  return true;
 }; 

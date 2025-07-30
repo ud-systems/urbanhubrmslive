@@ -78,8 +78,8 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({
         throw new Error(methodError.message);
       }
 
-      // Create payment intent on the server
-      const response = await fetch('/api/create-payment-intent', {
+      // Create payment intent on Supabase Edge Function
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-payment-intent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

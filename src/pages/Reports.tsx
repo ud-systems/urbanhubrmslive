@@ -26,8 +26,12 @@ import {
   RefreshCw,
   Eye,
   FileSpreadsheet,
-  ChevronDown
+  ChevronDown,
+  ArrowLeft,
+  CheckCircle,
+  AlertCircle
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { 
   getLeads, 
   getStudents, 
@@ -40,6 +44,13 @@ import {
   getRoomGrades,
   getStayDurations
 } from "@/lib/supabaseCrud";
+import { 
+  getCompleteStudentData, 
+  getStudentDataSummary, 
+  exportStudentData, 
+  downloadFile,
+  type CompleteStudentData 
+} from "@/lib/studentDataExport";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from "date-fns";
 import { DateRange } from "react-day-picker";
@@ -80,6 +91,8 @@ interface ReportMetrics {
 }
 
 const Reports = () => {
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("leads");
   const [reportType, setReportType] = useState("overview");
   const [dateRange, setDateRange] = useState("30");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
@@ -105,6 +118,11 @@ const Reports = () => {
   const [assignedStudio, setAssignedStudio] = useState("all");
   const [roomGrade, setRoomGrade] = useState("all");
   const [duration, setDuration] = useState("all");
+
+  // Student data state
+  const [completeStudentData, setCompleteStudentData] = useState<CompleteStudentData[]>([]);
+  const [studentSummary, setStudentSummary] = useState<any>(null);
+  const [studentLoading, setStudentLoading] = useState(false);
 
   // Fetch all data on component mount
   useEffect(() => {
@@ -518,22 +536,111 @@ const Reports = () => {
     }
   };
 
+  // Student data functions
+  const fetchStudentData = async () => {
+    setStudentLoading(true);
+    try {
+      const [studentData, summary] = await Promise.all([
+        getCompleteStudentData({ includeIncomplete: true }),
+        getStudentDataSummary()
+      ]);
+      
+      setCompleteStudentData(studentData);
+      setStudentSummary(summary);
+      
+      toast({
+        title: "Success",
+        description: `Loaded ${studentData.length} student records with complete profile data`
+      });
+    } catch (error) {
+      console.error('Error fetching student data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch student data",
+        variant: "destructive"
+      });
+    } finally {
+      setStudentLoading(false);
+    }
+  };
+
+  const handleExportStudents = async () => {
+    try {
+      const csvData = await exportStudentData(completeStudentData, 'csv');
+      const filename = `students_complete_data_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.csv`;
+      downloadFile(csvData, filename, 'text/csv');
+      
+      toast({
+        title: "Export Successful",
+        description: `Downloaded ${completeStudentData.length} student records`
+      });
+    } catch (error) {
+      console.error('Error exporting student data:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to export student data",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner fullScreen text="Loading reports..." />;
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">Reports & Analytics</h2>
-          <p className="text-slate-600 mt-1">Generate comprehensive reports and export data</p>
-        </div>
-        <Button onClick={fetchData} disabled={loading} variant="outline">
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Data
-        </Button>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
+      <div className="max-w-[1440px] mx-auto px-6 py-8 animate-fade-in">
+        <div className="space-y-6">
+          {/* Header with title, subtitle, and back button */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-900">Reports & Analytics</h1>
+              <p className="text-slate-600 mt-1">Generate comprehensive reports and export data</p>
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={() => navigate('/modules')}
+              className="text-slate-600 hover:text-slate-900 border-slate-300 hover:border-slate-400"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </div>
+
+      {/* Main Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="leads" className="flex items-center gap-2">
+            <Target className="w-4 h-4" />
+            Leads
+          </TabsTrigger>
+          <TabsTrigger value="students" className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            Students
+          </TabsTrigger>
+          <TabsTrigger value="tourists" className="flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            Tourists
+          </TabsTrigger>
+          <TabsTrigger value="finance" className="flex items-center gap-2">
+            <DollarSign className="w-4 h-4" />
+            Finance
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Leads Tab */}
+        <TabsContent value="leads" className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Leads Reports</h2>
+              <p className="text-slate-600 mt-1">Analyze lead performance and conversion metrics</p>
+            </div>
+            <Button onClick={fetchData} disabled={loading} variant="outline">
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh Data
+            </Button>
+          </div>
 
       {/* Filters */}
       <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
@@ -1152,6 +1259,211 @@ const Reports = () => {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
+
+                   {/* Students Tab */}
+           <TabsContent value="students" className="space-y-6">
+             <div className="flex items-center justify-between">
+               <div>
+                 <h2 className="text-xl font-semibold text-slate-900">Students Reports</h2>
+                 <p className="text-slate-600 mt-1">Analyze student enrollment and performance metrics</p>
+               </div>
+               <div className="flex items-center space-x-3">
+                 <Button onClick={fetchStudentData} disabled={studentLoading} variant="outline">
+                   <RefreshCw className={`w-4 h-4 mr-2 ${studentLoading ? 'animate-spin' : ''}`} />
+                   Refresh Data
+                 </Button>
+                 <Button onClick={handleExportStudents} disabled={studentLoading} className="bg-green-600 hover:bg-green-700">
+                   <Download className="w-4 h-4 mr-2" />
+                   Export All Students
+                 </Button>
+               </div>
+             </div>
+             
+             {/* Student Data Summary */}
+             {studentSummary && (
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                 <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                   <CardContent className="p-6">
+                     <div className="flex items-center justify-between">
+                       <div>
+                         <p className="text-sm font-medium text-slate-600">Total Students</p>
+                         <p className="text-2xl font-bold text-slate-900">{studentSummary.total}</p>
+                       </div>
+                       <Users className="w-8 h-8 text-blue-600" />
+                     </div>
+                   </CardContent>
+                 </Card>
+                 
+                 <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                   <CardContent className="p-6">
+                     <div className="flex items-center justify-between">
+                       <div>
+                         <p className="text-sm font-medium text-slate-600">Complete Profiles</p>
+                         <p className="text-2xl font-bold text-green-600">{studentSummary.withCompleteProfiles}</p>
+                       </div>
+                       <CheckCircle className="w-8 h-8 text-green-600" />
+                     </div>
+                   </CardContent>
+                 </Card>
+                 
+                 <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                   <CardContent className="p-6">
+                     <div className="flex items-center justify-between">
+                       <div>
+                         <p className="text-sm font-medium text-slate-600">Incomplete Profiles</p>
+                         <p className="text-2xl font-bold text-orange-600">{studentSummary.withIncompleteProfiles}</p>
+                       </div>
+                       <AlertCircle className="w-8 h-8 text-orange-600" />
+                     </div>
+                   </CardContent>
+                 </Card>
+                 
+                 <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                   <CardContent className="p-6">
+                     <div className="flex items-center justify-between">
+                       <div>
+                         <p className="text-sm font-medium text-slate-600">Profile Completion</p>
+                         <p className="text-2xl font-bold text-purple-600">
+                           {studentSummary.total > 0 ? Math.round((studentSummary.withCompleteProfiles / studentSummary.total) * 100) : 0}%
+                         </p>
+                       </div>
+                       <BarChart3 className="w-8 h-8 text-purple-600" />
+                     </div>
+                   </CardContent>
+                 </Card>
+               </div>
+             )}
+             
+             {/* Student Data Table */}
+             {completeStudentData.length > 0 && (
+               <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                 <CardHeader>
+                   <CardTitle className="flex items-center gap-2">
+                     <Users className="w-5 h-5" />
+                     Student Data with Complete Profiles
+                   </CardTitle>
+                   <p className="text-sm text-slate-600">
+                     Showing {completeStudentData.length} students with comprehensive profile information
+                   </p>
+                 </CardHeader>
+                 <CardContent>
+                   <div className="overflow-x-auto">
+                     <Table>
+                       <TableHeader>
+                         <TableRow>
+                           <TableHead>Name</TableHead>
+                           <TableHead>Email</TableHead>
+                           <TableHead>Country</TableHead>
+                           <TableHead>Year of Study</TableHead>
+                           <TableHead>Field of Study</TableHead>
+                           <TableHead>Studio</TableHead>
+                           <TableHead>Payment Plan</TableHead>
+                           <TableHead>Profile Status</TableHead>
+                         </TableRow>
+                       </TableHeader>
+                       <TableBody>
+                         {completeStudentData.slice(0, 10).map((student) => (
+                           <TableRow key={student.id}>
+                             <TableCell className="font-medium">{student.name}</TableCell>
+                             <TableCell>{student.email}</TableCell>
+                             <TableCell>{student.country || 'Not specified'}</TableCell>
+                             <TableCell>{student.year_of_study || 'Not specified'}</TableCell>
+                             <TableCell>{student.field_of_study || 'Not specified'}</TableCell>
+                             <TableCell>{student.studio_name || 'Not assigned'}</TableCell>
+                             <TableCell>{student.payment_plan_name || 'Not specified'}</TableCell>
+                             <TableCell>
+                               <Badge variant={student.is_complete ? 'default' : 'secondary'}>
+                                 {student.is_complete ? 'Complete' : 'Incomplete'}
+                               </Badge>
+                             </TableCell>
+                           </TableRow>
+                         ))}
+                       </TableBody>
+                     </Table>
+                     {completeStudentData.length > 10 && (
+                       <div className="mt-4 text-center">
+                         <p className="text-sm text-slate-600">
+                           Showing first 10 of {completeStudentData.length} students. 
+                           Use the export button to download all data.
+                         </p>
+                       </div>
+                     )}
+                   </div>
+                 </CardContent>
+               </Card>
+             )}
+             
+             {/* No Data State */}
+             {completeStudentData.length === 0 && !studentLoading && (
+               <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+                 <CardContent className="p-8">
+                   <div className="text-center">
+                     <Users className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                     <h3 className="text-lg font-semibold text-slate-900 mb-2">No Student Data</h3>
+                     <p className="text-slate-600 mb-4">No students with complete profile information found</p>
+                     <Button onClick={fetchStudentData} variant="outline">
+                       <RefreshCw className="w-4 h-4 mr-2" />
+                       Refresh Data
+                     </Button>
+                   </div>
+                 </CardContent>
+               </Card>
+             )}
+           </TabsContent>
+
+        {/* Tourists Tab */}
+        <TabsContent value="tourists" className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Tourists Reports</h2>
+              <p className="text-slate-600 mt-1">Analyze tourist bookings and short-term stay metrics</p>
+            </div>
+            <Button onClick={fetchData} disabled={loading} variant="outline">
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh Data
+            </Button>
+          </div>
+          
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardContent className="p-8">
+              <div className="text-center">
+                <Building2 className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">Tourists Reports</h3>
+                <p className="text-slate-600 mb-4">Comprehensive tourist analytics and reporting features</p>
+                <p className="text-sm text-slate-500">Coming soon - We're building this section for you!</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Finance Tab */}
+        <TabsContent value="finance" className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Finance Reports</h2>
+              <p className="text-slate-600 mt-1">Analyze revenue, payments, and financial performance</p>
+            </div>
+            <Button onClick={fetchData} disabled={loading} variant="outline">
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh Data
+            </Button>
+          </div>
+          
+          <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
+            <CardContent className="p-8">
+              <div className="text-center">
+                <DollarSign className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">Finance Reports</h3>
+                <p className="text-slate-600 mb-4">Comprehensive financial analytics and reporting features</p>
+                <p className="text-sm text-slate-500">Coming soon - We're building this section for you!</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+        </div>
+      </div>
     </div>
   );
 };

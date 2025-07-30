@@ -26,9 +26,10 @@ import {
   DollarSign,
   Shield,
   AlertTriangle,
-  User
+  User,
+  CheckCircle
 } from "lucide-react";
-import { getStudents, updateStudent, deleteStudent, createStudent, updateStudio, bulkDeleteStudents, createStudentUserAccount, createStudentWithUserAccount, createStudentInvoice } from "@/lib/supabaseCrud";
+import { getStudents, updateStudent, deleteStudent, createStudent, updateStudio, bulkDeleteStudents, createStudentUserAccount, createStudentWithUserAccount, createStudentInvoice, getPaymentPlans } from "@/lib/supabaseCrud";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import BulkEditStudentModal from "@/components/BulkEditStudentModal";
@@ -99,9 +100,24 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
   const [weeklyRate, setWeeklyRate] = useState(320);
   const [customWeeks, setCustomWeeks] = useState("");
   const [totalRevenue, setTotalRevenue] = useState(0);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [studioSearchTerm, setStudioSearchTerm] = useState("");
-  const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
+  const [selectedPaymentPlan, setSelectedPaymentPlan] = useState("");
+  const [paymentPlans, setPaymentPlans] = useState<any[]>([]);
   const vacantStudios = studios.filter(studio => !studio.occupied);
+
+  // Fetch payment plans on component mount
+  useEffect(() => {
+    const fetchPaymentPlans = async () => {
+      try {
+        const plans = await getPaymentPlans();
+        setPaymentPlans(plans || []);
+      } catch (error) {
+        console.error('Error fetching payment plans:', error);
+      }
+    };
+    fetchPaymentPlans();
+  }, []);
 
   const calculateRevenue = () => {
     if (durationType === "short" && checkInDate && checkOutDate) {
@@ -115,6 +131,13 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       setTotalRevenue(parseInt(customWeeks) * weeklyRate);
     }
   };
+
+  // Auto-calculate revenue when rates or duration changes
+  useEffect(() => {
+    if (durationType && (weeklyRate > 0 || dailyRate > 0)) {
+      calculateRevenue();
+    }
+  }, [durationType, weeklyRate, dailyRate, checkInDate, checkOutDate, customWeeks]);
 
 
 
@@ -218,6 +241,11 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       };
     }
 
+    // Add payment plan validation for long-term stays
+    if (durationType === "45-weeks" || durationType === "51-weeks" || durationType === "custom") {
+      validationRules.selectedPaymentPlan = { required: true };
+    }
+
     // Validate form data
     const formData = {
       ...newStudent,
@@ -225,7 +253,8 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       assignedto: newStudent.assignedto,
       checkin: checkInDate,
       checkout: checkOutDate,
-      customWeeks
+      customWeeks,
+      selectedPaymentPlan
     };
 
     const validation = validateForm(formData, validationRules);
@@ -251,7 +280,13 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                   durationType === "51-weeks" ? "51 weeks" : 
                   durationType === "custom" ? `${customWeeks} weeks` : 
                   checkInDate && checkOutDate ? `${Math.ceil((new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24))} days` : "",
-        revenue: totalRevenue || 0
+        revenue: totalRevenue || 0,
+        // Add payment plan information for long-term stays
+        ...(selectedPaymentPlan && {
+          payment_plan_id: parseInt(selectedPaymentPlan),
+          wants_installments: true,
+          selected_installment_plan: paymentPlans.find(p => p.id.toString() === selectedPaymentPlan)?.name || ''
+        })
         // Note: Don't include 'room' field as it causes foreign key constraint violations
         // The 'assignedto' field handles studio assignment
       };
@@ -310,8 +345,7 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       setTotalRevenue(0);
       setStudioSearchTerm("");
       setValidationErrors({});
-      
-      toast({ title: 'Student created', description: 'Student added successfully.' });
+      setSelectedPaymentPlan("");
     } catch (e: any) {
       console.error('Student creation error:', e);
       toast({ 
@@ -508,18 +542,20 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                       <Shield className="w-5 h-5 text-red-600" />
                       <span>Confirm Bulk Delete</span>
                     </AlertDialogTitle>
-                    <AlertDialogDescription className="space-y-2">
-                      <div className="flex items-center space-x-2 p-3 bg-red-50 rounded-lg">
-                        <AlertTriangle className="w-4 h-4 text-red-600" />
-                        <span className="text-red-700 font-medium">Dangerous Action</span>
+                    <AlertDialogDescription asChild>
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2 p-3 bg-red-50 rounded-lg">
+                          <AlertTriangle className="w-4 h-4 text-red-600" />
+                          <span className="text-red-700 font-medium">Dangerous Action</span>
+                        </div>
+                        <div>
+                          You are about to permanently delete <strong>{selectedStudents.length} students</strong>. 
+                          This action cannot be undone and will remove all associated data including studio assignments.
+                        </div>
+                        <div className="text-sm text-slate-600">
+                          Selected students: {selectedStudents.length} item{selectedStudents.length !== 1 ? 's' : ''}
+                        </div>
                       </div>
-                      <p>
-                        You are about to permanently delete <strong>{selectedStudents.length} students</strong>. 
-                        This action cannot be undone and will remove all associated data including studio assignments.
-                      </p>
-                      <p className="text-sm text-slate-600">
-                        Selected students: {selectedStudents.length} item{selectedStudents.length !== 1 ? 's' : ''}
-                      </p>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -599,6 +635,15 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                       assignedto: selectedStudioId,
                       room: selectedStudio?.roomGrade || "" // Auto-populate room grade from selected studio
                     }));
+                    
+                    // Auto-set weekly rate based on room grade if available
+                    if (selectedStudio?.roomGrade) {
+                      // Find the room grade and get its default weekly rate
+                      const roomGradeData = roomGrades.find(rg => rg.name === selectedStudio.roomGrade);
+                      if (roomGradeData && roomGradeData.weekly_rate) {
+                        setWeeklyRate(roomGradeData.weekly_rate);
+                      }
+                    }
                   }}
                 >
                   <SelectTrigger>
@@ -660,6 +705,41 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Payment Plan Selection - Only for long-term stays */}
+              {(durationType === "45-weeks" || durationType === "51-weeks" || durationType === "custom") && (
+                <div className="space-y-4">
+                  <Label className="text-base font-medium">Payment Plan</Label>
+                  <Select value={selectedPaymentPlan} onValueChange={setSelectedPaymentPlan}>
+                    <SelectTrigger className={validationErrors.selectedPaymentPlan ? "border-red-500" : ""}>
+                      <SelectValue placeholder="Select payment plan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paymentPlans.map(plan => (
+                        <SelectItem key={plan.id} value={plan.id.toString()}>
+                          {plan.name} ({plan.payment_cycles} cycles)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {validationErrors.selectedPaymentPlan && (
+                    <p className="text-sm text-red-600">{validationErrors.selectedPaymentPlan}</p>
+                  )}
+                  {selectedPaymentPlan && (
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                        <span className="text-sm text-green-700">
+                          ✓ Payment plan selected: {paymentPlans.find(p => p.id.toString() === selectedPaymentPlan)?.name}
+                        </span>
+                      </div>
+                      <p className="text-xs text-green-600 mt-1">
+                        Installment amount will be calculated based on your weekly rate
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Date Inputs */}
               {(durationType === "short" || durationType === "custom") && (
@@ -724,11 +804,7 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                 )}
               </div>
 
-              {/* Calculate Button */}
-              <Button onClick={calculateRevenue} variant="outline" className="w-full">
-                <DollarSign className="w-4 h-4 mr-2" />
-                Calculate Total Revenue
-              </Button>
+              {/* Revenue is calculated automatically */}
 
               {/* Total Revenue Display */}
               {totalRevenue > 0 && (

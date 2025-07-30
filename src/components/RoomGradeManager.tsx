@@ -21,21 +21,24 @@ interface RoomGrade {
   id: number;
   name: string;
   stock?: number;
+  weekly_rate?: number;
 }
 
 interface RoomGradeManagerProps {
   items: RoomGrade[];
-  onAdd: (name: string, stock: number) => Promise<void>;
-  onEdit: (id: number, name: string, stock: number) => Promise<void>;
+  onAdd: (name: string, stock: number, weekly_rate: number) => Promise<void>;
+  onEdit: (id: number, name: string, stock: number, weekly_rate: number) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
 }
 
 const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerProps) => {
   const [newName, setNewName] = useState("");
   const [newStock, setNewStock] = useState<number>(0);
+  const [newWeeklyRate, setNewWeeklyRate] = useState<number>(320);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [editingStock, setEditingStock] = useState<number>(0);
+  const [editingWeeklyRate, setEditingWeeklyRate] = useState<number>(320);
   const [loading, setLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -49,9 +52,10 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
     if (!newName.trim()) return;
     setLoading(true);
     try {
-      await onAdd(newName.trim(), newStock);
+      await onAdd(newName.trim(), newStock, newWeeklyRate);
       setNewName("");
       setNewStock(0);
+      setNewWeeklyRate(320);
       setIsAdding(false);
     } catch (error) {
       console.error('Error adding room grade:', error);
@@ -64,10 +68,11 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
     if (!editingName.trim()) return;
     setLoading(true);
     try {
-      await onEdit(id, editingName.trim(), editingStock);
+      await onEdit(id, editingName.trim(), editingStock, editingWeeklyRate);
       setEditingId(null);
       setEditingName("");
       setEditingStock(0);
+      setEditingWeeklyRate(320);
     } catch (error) {
       console.error('Error editing room grade:', error);
     } finally {
@@ -91,6 +96,7 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
     setEditingId(item.id);
     setEditingName(item.name);
     setEditingStock(item.stock || 0);
+    setEditingWeeklyRate(item.weekly_rate || 320);
   };
 
   return (
@@ -129,7 +135,7 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
         {/* Add New Room Grade */}
         {isAdding ? (
           <div className="space-y-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label htmlFor="new-name" className="text-sm font-medium text-slate-700">Name</Label>
                 <Input
@@ -143,15 +149,28 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
               </div>
               <div>
                 <Label htmlFor="new-stock" className="text-sm font-medium text-slate-700">Stock</Label>
-                                 <Input
-                   id="new-stock"
-                   type="number"
-                   min="0"
-                   value={newStock || ''}
-                   onChange={e => setNewStock(parseInt(e.target.value) || 0)}
-                   placeholder="Available units"
-                   onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
-                 />
+                <Input
+                  id="new-stock"
+                  type="number"
+                  min="0"
+                  value={newStock || ''}
+                  onChange={e => setNewStock(parseInt(e.target.value) || 0)}
+                  placeholder="Available units"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
+                />
+              </div>
+              <div>
+                <Label htmlFor="new-weekly-rate" className="text-sm font-medium text-slate-700">Weekly Rate (£)</Label>
+                <Input
+                  id="new-weekly-rate"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newWeeklyRate || ''}
+                  onChange={e => setNewWeeklyRate(parseFloat(e.target.value) || 320)}
+                  placeholder="320.00"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
+                />
               </div>
             </div>
             <div className="flex items-center space-x-2">
@@ -217,14 +236,26 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
                     </div>
                     <div className="w-24">
                       <Label htmlFor={`edit-stock-${item.id}`} className="text-sm font-medium text-slate-700">Stock</Label>
-                                             <Input
-                         id={`edit-stock-${item.id}`}
-                         type="number"
-                         min="0"
-                         value={editingStock || ''}
-                         onChange={e => setEditingStock(parseInt(e.target.value) || 0)}
-                         onKeyPress={(e) => e.key === 'Enter' && handleEdit(item.id)}
-                       />
+                      <Input
+                        id={`edit-stock-${item.id}`}
+                        type="number"
+                        min="0"
+                        value={editingStock || ''}
+                        onChange={e => setEditingStock(parseInt(e.target.value) || 0)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleEdit(item.id)}
+                      />
+                    </div>
+                    <div className="w-32">
+                      <Label htmlFor={`edit-weekly-rate-${item.id}`} className="text-sm font-medium text-slate-700">Weekly Rate (£)</Label>
+                      <Input
+                        id={`edit-weekly-rate-${item.id}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editingWeeklyRate || ''}
+                        onChange={e => setEditingWeeklyRate(parseFloat(e.target.value) || 320)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleEdit(item.id)}
+                      />
                     </div>
                     <Button 
                       size="sm" 
@@ -247,11 +278,16 @@ const RoomGradeManager = ({ items, onAdd, onEdit, onDelete }: RoomGradeManagerPr
                     <div className="flex items-center space-x-3">
                       <div>
                         <h4 className="font-medium text-slate-900">{item.name}</h4>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <Package className="w-4 h-4 text-slate-400" />
-                                                   <span className="text-sm text-slate-600">
-                           {item.stock || 0} unit{(item.stock || 0) !== 1 ? 's' : ''} available
-                         </span>
+                        <div className="flex items-center space-x-4 mt-1">
+                          <div className="flex items-center space-x-2">
+                            <Package className="w-4 h-4 text-slate-400" />
+                            <span className="text-sm text-slate-600">
+                              {item.stock || 0} unit{(item.stock || 0) !== 1 ? 's' : ''} available
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-medium text-green-600">£{item.weekly_rate || 320}/week</span>
+                          </div>
                         </div>
                       </div>
                     </div>

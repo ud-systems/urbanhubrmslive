@@ -2,6 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Responsive scaling for smaller desktop screens */
+@media (max-width: 1439px) {
+  html {
+    zoom: 0.85;
+  }
+}
+
+/* Ensure proper scaling on different browsers */
+@media (max-width: 1439px) {
+  html {
+    transform: scale(0.85);
+    transform-origin: top left;
+  }
+}
+
+/* Alternative for browsers that don't support zoom */
+@supports not (zoom: 0.85) {
+  @media (max-width: 1439px) {
+    html {
+      transform: scale(0.85);
+      transform-origin: top left;
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Smooth animations */
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Container utilities */
+.container-1440 {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .container-1440 {
+    padding: 0 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-1440 {
+    padding: 0 2.5rem;
+  }
+}
+
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */

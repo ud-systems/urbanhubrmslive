@@ -40,6 +40,7 @@ export interface WorkflowAction {
 }
 
 export class WorkflowEngine {
+  private static readonly EMAIL_ENABLED = false; // ❌ DISABLE EMAILS FOR BOUNCE RATE PROTECTION
   private static readonly DEFAULT_RULES: WorkflowRule[] = [
     {
       id: 'new_lead_welcome',
@@ -298,6 +299,11 @@ export class WorkflowEngine {
   }
 
   private static async sendEmail(params: Record<string, any>, data: any): Promise<void> {
+    if (!this.EMAIL_ENABLED) {
+      console.log('📧 Email sending disabled for bounce rate protection');
+      return;
+    }
+    
     try {
       const templateId = params.template || 'follow_up';
       const variables = {
@@ -317,8 +323,7 @@ export class WorkflowEngine {
       const success = await emailService.sendTemplateEmail(
         templateId,
         data.email,
-        variables,
-        data.id
+        variables
       );
 
       if (success) {

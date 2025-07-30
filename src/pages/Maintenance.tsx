@@ -223,21 +223,18 @@ const Maintenance = () => {
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-4">
-              <Button 
-                variant="ghost" 
-                onClick={() => navigate('/modules')}
-                className="text-slate-600 hover:text-slate-900"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <div className="h-8 w-px bg-slate-300" />
-              <div className="flex items-center space-x-3">
-                <Wrench className="w-6 h-6 text-orange-600" />
-                <h1 className="text-xl font-semibold text-slate-900">Maintenance Requests</h1>
-              </div>
+            <div className="flex items-center space-x-3">
+              <Wrench className="w-6 h-6 text-orange-600" />
+              <h1 className="text-xl font-semibold text-slate-900">Maintenance Requests</h1>
             </div>
+            <Button 
+              variant="ghost" 
+              onClick={() => navigate('/modules')}
+              className="text-slate-600 hover:text-slate-900"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Dashboard
+            </Button>
           </div>
         </div>
       </div>

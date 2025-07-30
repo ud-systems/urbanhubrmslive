@@ -22,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import * as XLSX from "xlsx";
+import * as ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { Progress } from "@/components/ui/progress";
@@ -481,13 +481,39 @@ const Settings = () => {
       });
     } else if (["xlsx", "xls"].includes(ext || "")) {
       const reader = new FileReader();
-      reader.onload = (evt) => {
-        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet);
-        setBulkUsers(json);
-        setBulkUploadType("excel");
+      reader.onload = async (evt) => {
+        try {
+          const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(data);
+          const worksheet = workbook.getWorksheet(1);
+          const json: any[] = [];
+          
+          if (worksheet) {
+            const headers: string[] = [];
+            worksheet.getRow(1).eachCell((cell, colNumber) => {
+              headers[colNumber - 1] = cell.value?.toString() || '';
+            });
+            
+            worksheet.eachRow((row, rowNumber) => {
+              if (rowNumber > 1) { // Skip header row
+                const rowData: any = {};
+                row.eachCell((cell, colNumber) => {
+                  const header = headers[colNumber - 1];
+                  if (header) {
+                    rowData[header] = cell.value?.toString() || '';
+                  }
+                });
+                json.push(rowData);
+              }
+            });
+          }
+          
+          setBulkUsers(json);
+          setBulkUploadType("excel");
+        } catch (error) {
+          setBulkUploadError("Error reading Excel file. Please ensure it's a valid Excel file.");
+        }
       };
       reader.readAsArrayBuffer(file);
     } else {
@@ -1579,18 +1605,18 @@ STD003,Silver Studio C3,${studioViews[2]?.name || 'Asmoor Lane'},2,${roomGrades[
               
               <RoomGradeManager
                 items={roomGrades}
-                onAdd={async (name, stock) => { 
+                onAdd={async (name, stock, weekly_rate) => { 
                   try {
-                    await createRoomGrade(name, stock);
+                    await createRoomGrade(name, stock, weekly_rate);
                     await fetchConfigs();
                     toast({ title: 'Room Grade Added', description: 'New room grade created successfully.' });
                   } catch (error) {
                     toast({ title: 'Error', description: 'Failed to create room grade.', variant: 'destructive' });
                   }
                 }}
-                onEdit={async (id, name, stock) => { 
+                onEdit={async (id, name, stock, weekly_rate) => { 
                   try {
-                    await updateRoomGrade(id, name, stock);
+                    await updateRoomGrade(id, name, stock, weekly_rate);
                     await fetchConfigs();
                     toast({ title: 'Room Grade Updated', description: 'Room grade updated successfully.' });
                   } catch (error) {

@@ -163,14 +163,16 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         if (application) {
           setApplicationData(application);
           const newFormData = {
-            first_name: application.first_name || student.name?.split(' ')[0] || '',
-            last_name: application.last_name || student.name?.split(' ').slice(1).join(' ') || '',
+            // Use full name from first_name field, keep last_name empty
+            first_name: application.first_name || student.name || '',
+            last_name: '', // Keep empty for full name approach
             birthday: application.birthday || '',
             age: application.age || calculateAge(application.birthday || ''),
             ethnicity: application.ethnicity || '',
             gender: application.gender || '',
             ucas_id: application.ucas_id || '',
             country: application.country || '',
+            // Ensure phone/email mapping is correct
             email: application.email || student.email || '',
             mobile: application.mobile || student.phone || '',
             address_line_1: application.address_line_1 || '',
@@ -218,8 +220,8 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           // Create application record if it doesn't exist
           const newApplication = {
             user_id: student.user_id,
-            first_name: student.name?.split(' ')[0] || '',
-            last_name: student.name?.split(' ').slice(1).join(' ') || '',
+            first_name: student.name || '', // Use full name
+            last_name: '', // Keep empty for full name approach
             email: student.email || '',
             mobile: student.phone || '',
             deposit_paid: student.deposit_paid || false,
@@ -239,7 +241,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             setApplicationData(createdApplication);
             const newFormData = {
               first_name: createdApplication.first_name || '',
-              last_name: createdApplication.last_name || '',
+              last_name: '', // Keep empty for full name approach
               birthday: '',
               age: 0,
               ethnicity: '',
@@ -678,8 +680,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {renderEditableField('first_name', 'First Name', 'text')}
-            {renderEditableField('last_name', 'Last Name', 'text')}
+            {renderEditableField('first_name', 'Full Name', 'text')}
             {renderEditableField('birthday', 'Birthday', 'date')}
             <div className="space-y-2">
               <Label className="text-sm font-medium text-slate-600">Age</Label>

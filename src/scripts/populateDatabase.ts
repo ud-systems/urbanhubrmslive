@@ -231,7 +231,7 @@ export async function populateDatabase() {
       
       leads.push({
         name,
-        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@email.com`,
+        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@gmail.com`, // ✅ VALID DOMAIN
         phone: randomPhone(),
         status: randomChoice(DATABASE_OPTIONS.leadStatuses),
         source: randomChoice(DATABASE_OPTIONS.leadSources),
@@ -272,7 +272,7 @@ export async function populateDatabase() {
       
       students.push({
         name,
-        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@student.ac.uk`,
+        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@outlook.com`, // ✅ VALID DOMAIN
         phone: randomPhone(),
         room: studio.id,
         duration: randomChoice(DATABASE_OPTIONS.stayDurations.filter(d => !d.includes('Week'))), // Long-term only
@@ -306,7 +306,7 @@ export async function populateDatabase() {
       
       tourists.push({
         name,
-        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@tourist.com`,
+        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@yahoo.com`, // ✅ VALID DOMAIN
         phone: randomPhone(),
         room: studio.id,
         duration: randomChoice(['1 Week', '2 Weeks', '3 Weeks', '1 Month']), // Short-term only
