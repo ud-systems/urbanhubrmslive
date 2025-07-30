@@ -358,7 +358,6 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
       
       // ✅ FIXED: Update both tables for consistency
       const updatePromises = [];
-      const updateResults = [];
       
       // Update application data if exists
       if (applicationData) {
@@ -377,7 +376,8 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         const appUpdatePromise = supabase
           .from('student_applications')
           .update(appUpdateData)
-          .eq('id', applicationData.id);
+          .eq('id', applicationData.id)
+          .select(); // Add select to get updated data
         
         updatePromises.push(appUpdatePromise);
       }
@@ -402,7 +402,8 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           const studentUpdatePromise = supabase
             .from('students')
             .update(studentUpdateData)
-            .eq('id', studentData.id);
+            .eq('id', studentData.id)
+            .select(); // Add select to get updated data
           
           updatePromises.push(studentUpdatePromise);
         }
@@ -412,11 +413,17 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
       console.log('🚀 Executing', updatePromises.length, 'updates...');
       const results = await Promise.all(updatePromises);
       
-      // Check for errors
+      // Check for errors and log results
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
         if (result.error) {
           console.error(`❌ Update ${i + 1} failed:`, result.error);
+          console.error('Error details:', {
+            message: result.error.message,
+            code: result.error.code,
+            details: result.error.details,
+            hint: result.error.hint
+          });
           throw result.error;
         } else {
           console.log(`✅ Update ${i + 1} successful:`, result.data);
@@ -442,8 +449,10 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           console.warn('⚠️ Failed to create audit trail:', auditError);
         }
 
-        // Update local application data
-        setApplicationData(prev => prev ? { ...prev, [fieldName]: updatedValue } : null);
+        // Update local application data with the actual updated data
+        if (results[0]?.data) {
+          setApplicationData(prev => prev ? { ...prev, ...results[0].data[0] } : null);
+        }
       }
 
       // Update local student data if applicable
@@ -454,10 +463,10 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           'mobile': 'phone'
         };
         
-        setStudentData(prev => prev ? { 
-          ...prev, 
-          [fieldMapping[fieldName]]: updatedValue 
-        } : null);
+        // Update with the actual updated data from the second result
+        if (results[1]?.data) {
+          setStudentData(prev => prev ? { ...prev, ...results[1].data[0] } : null);
+        }
       }
 
       // Update local form data
@@ -732,8 +741,144 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
     { value: 'Other', label: 'Other' }
   ];
 
+  // Debug function to test database connection and field updates
+  const debugDatabaseConnection = async () => {
+    try {
+      console.log('🔍 Debugging database connection...');
+      
+      // Test 1: Check if we can read student data
+      const { data: studentTest, error: studentError } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', studentId)
+        .single();
+      
+      console.log('📊 Student data test:', { data: studentTest, error: studentError });
+      
+      // Test 2: Check if we can read application data
+      if (studentTest?.user_id) {
+        const { data: appTest, error: appError } = await supabase
+          .from('student_applications')
+          .select('*')
+          .eq('user_id', studentTest.user_id)
+          .single();
+        
+        console.log('📋 Application data test:', { data: appTest, error: appError });
+        
+        // Test 3: Try a simple update
+        if (appTest) {
+          const { data: updateTest, error: updateError } = await supabase
+            .from('student_applications')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', appTest.id)
+            .select();
+          
+          console.log('✏️ Update test:', { data: updateTest, error: updateError });
+        }
+      }
+      
+      // Test 4: Check RLS policies
+      console.log('🔐 Current user:', user);
+      console.log('🔐 User role:', user?.role);
+      
+    } catch (error) {
+      console.error('❌ Debug test failed:', error);
+    }
+  };
+
+  // Add debug button to UI
+  useEffect(() => {
+    // Run debug test on component mount
+    debugDatabaseConnection();
+  }, [studentId]);
+
   return (
     <div className="space-y-6">
+      {/* Debug Section - Remove in production */}
+      <Card className="border-orange-200 bg-orange-50">
+        <CardHeader>
+          <CardTitle className="text-orange-800 text-sm">🔧 Debug Panel (Development Only)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex space-x-2">
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={debugDatabaseConnection}
+              className="text-xs"
+            >
+              Test Database Connection
+            </Button>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={() => {
+                console.log('📊 Current State:', {
+                  studentData,
+                  applicationData,
+                  formData,
+                  user
+                });
+              }}
+              className="text-xs"
+            >
+              Log Current State
+            </Button>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={async () => {
+                if (applicationData) {
+                  try {
+                    const result = await supabase
+                      .from('student_applications')
+                      .update({ updated_at: new Date().toISOString() })
+                      .eq('id', applicationData.id)
+                      .select();
+                    console.log('✅ Test update result:', result);
+                    toast({ title: 'Test Update', description: 'Test update completed' });
+                  } catch (error) {
+                    console.error('❌ Test update failed:', error);
+                    toast({ title: 'Test Update Failed', description: 'Check console for details', variant: 'destructive' });
+                  }
+                }
+              }}
+              className="text-xs"
+            >
+              Test Simple Update
+            </Button>
+          </div>
+          <div className="text-xs text-orange-700">
+            <p>Student ID: {studentId}</p>
+            <p>User ID: {user?.id}</p>
+            <p>Application ID: {applicationData?.id}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Profile Completion */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Profile Completion</span>
+            <Badge variant={profileCompletion >= 80 ? "default" : profileCompletion >= 60 ? "secondary" : "destructive"}>
+              {profileCompletion}% Complete
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>Progress</span>
+              <span>{profileCompletion}%</span>
+            </div>
+            <Progress value={profileCompletion} className="w-full" />
+            <p className="text-xs text-muted-foreground">
+              Complete your profile to unlock all features
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Personal Information */}
       <Card className="border-0 shadow-lg bg-white/80 backdrop-blur-md">
