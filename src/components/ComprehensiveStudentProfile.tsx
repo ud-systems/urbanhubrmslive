@@ -115,31 +115,16 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
     try {
       setLoading(true);
       
-      // Try to restore from localStorage first
-      const savedData = localStorage.getItem(`student-profile-${studentId}`);
-      if (savedData) {
-        try {
-          const parsed = JSON.parse(savedData);
-          const isRecent = Date.now() - parsed.timestamp < 300000; // 5 minutes
-          if (isRecent && parsed.formData) {
-            setFormData(parsed.formData);
-          }
-        } catch (e) {
-          console.warn('Failed to parse saved data:', e);
-        }
-      }
-      
-      // Fetch student data
+      // Get student data
       const { data: student, error: studentError } = await supabase
         .from('students')
         .select('*')
         .eq('id', studentId)
         .single();
-
+      
       if (studentError) throw studentError;
       setStudentData(student);
 
-      // Calculate age from birthday if available
       const calculateAge = (birthday: string) => {
         if (!birthday) return 0;
         const today = new Date();
@@ -163,16 +148,16 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         if (application) {
           setApplicationData(application);
           const newFormData = {
-            // Use full name from first_name field, keep last_name empty
+            // ✅ FIXED: Use consistent field mapping
             first_name: application.first_name || student.name || '',
-            last_name: '', // Keep empty for full name approach
+            last_name: application.last_name || '',
             birthday: application.birthday || '',
             age: application.age || calculateAge(application.birthday || ''),
             ethnicity: application.ethnicity || '',
             gender: application.gender || '',
             ucas_id: application.ucas_id || '',
             country: application.country || '',
-            // Ensure phone/email mapping is correct
+            // ✅ FIXED: Use application data first, fallback to student data
             email: application.email || student.email || '',
             mobile: application.mobile || student.phone || '',
             address_line_1: application.address_line_1 || '',
@@ -220,8 +205,8 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
           // Create application record if it doesn't exist
           const newApplication = {
             user_id: student.user_id,
-            first_name: student.name || '', // Use full name
-            last_name: '', // Keep empty for full name approach
+            first_name: student.name || '',
+            last_name: '',
             email: student.email || '',
             mobile: student.phone || '',
             deposit_paid: student.deposit_paid || false,
@@ -241,7 +226,7 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
             setApplicationData(createdApplication);
             const newFormData = {
               first_name: createdApplication.first_name || '',
-              last_name: '', // Keep empty for full name approach
+              last_name: '',
               birthday: '',
               age: 0,
               ethnicity: '',
@@ -281,21 +266,18 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
               current_visa_url: '',
               current_visa_filename: ''
             };
+            
             setFormData(newFormData);
           }
         }
       }
     } catch (error) {
       console.error('Error fetching student profile:', error);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to load student profile', 
-        variant: 'destructive' 
-      });
+      toast({ title: 'Error', description: 'Failed to load profile', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [studentId, supabase, toast]);
+  }, [studentId]);
 
   useEffect(() => {
     fetchStudentProfile();
@@ -355,6 +337,8 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
     try {
       setSaving(true);
       
+      console.log('🔄 Starting field update:', { fieldName, value, studentData, applicationData });
+      
       // Calculate age if birthday is being updated
       let updatedValue = value;
       let ageUpdate = null;
@@ -369,42 +353,111 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
         }
         updatedValue = value;
         ageUpdate = age;
+        console.log('📅 Age calculated:', { birthday: value, age });
       }
+      
+      // ✅ FIXED: Update both tables for consistency
+      const updatePromises = [];
+      const updateResults = [];
       
       // Update application data if exists
       if (applicationData) {
-        const updateData: any = { 
+        const appUpdateData: any = { 
           [fieldName]: updatedValue, 
           updated_at: new Date().toISOString() 
         };
         
         // If updating birthday, also update age
         if (ageUpdate !== null) {
-          updateData.age = ageUpdate;
+          appUpdateData.age = ageUpdate;
         }
         
-        const { error } = await supabase
+        console.log('📝 Updating student_applications:', { id: applicationData.id, data: appUpdateData });
+        
+        const appUpdatePromise = supabase
           .from('student_applications')
-          .update(updateData)
+          .update(appUpdateData)
           .eq('id', applicationData.id);
         
-        if (error) throw error;
+        updatePromises.push(appUpdatePromise);
+      }
 
-        // Create audit trail entry
-        await createAuditTrailEntry({
-          entity_type: 'application',
-          entity_id: applicationData.id,
-          action: 'updated',
-          field_name: fieldName,
-          old_value: formData[fieldName as keyof typeof formData],
-          new_value: updatedValue,
-          user_id: user?.id,
-          user_role: user?.role,
-          user_name: user?.name || user?.email
-        });
+      // ✅ FIXED: Also update students table for basic fields
+      if (studentData) {
+        const studentUpdateData: any = {};
+        
+        // Map application fields to student fields
+        const fieldMapping: { [key: string]: string } = {
+          'first_name': 'name',
+          'email': 'email', 
+          'mobile': 'phone'
+        };
+        
+        if (fieldMapping[fieldName]) {
+          studentUpdateData[fieldMapping[fieldName]] = updatedValue;
+          studentUpdateData.updated_at = new Date().toISOString();
+          
+          console.log('👤 Updating students table:', { id: studentData.id, data: studentUpdateData });
+          
+          const studentUpdatePromise = supabase
+            .from('students')
+            .update(studentUpdateData)
+            .eq('id', studentData.id);
+          
+          updatePromises.push(studentUpdatePromise);
+        }
+      }
+      
+      // Execute all updates
+      console.log('🚀 Executing', updatePromises.length, 'updates...');
+      const results = await Promise.all(updatePromises);
+      
+      // Check for errors
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.error) {
+          console.error(`❌ Update ${i + 1} failed:`, result.error);
+          throw result.error;
+        } else {
+          console.log(`✅ Update ${i + 1} successful:`, result.data);
+        }
+      }
+
+      // Create audit trail entry
+      if (applicationData) {
+        try {
+          await createAuditTrailEntry({
+            entity_type: 'application',
+            entity_id: applicationData.id,
+            action: 'updated',
+            field_name: fieldName,
+            old_value: formData[fieldName as keyof typeof formData],
+            new_value: updatedValue,
+            user_id: user?.id,
+            user_role: user?.role,
+            user_name: user?.name || user?.email
+          });
+          console.log('📊 Audit trail entry created');
+        } catch (auditError) {
+          console.warn('⚠️ Failed to create audit trail:', auditError);
+        }
 
         // Update local application data
         setApplicationData(prev => prev ? { ...prev, [fieldName]: updatedValue } : null);
+      }
+
+      // Update local student data if applicable
+      if (studentData && ['first_name', 'email', 'mobile'].includes(fieldName)) {
+        const fieldMapping: { [key: string]: string } = {
+          'first_name': 'name',
+          'email': 'email',
+          'mobile': 'phone'
+        };
+        
+        setStudentData(prev => prev ? { 
+          ...prev, 
+          [fieldMapping[fieldName]]: updatedValue 
+        } : null);
       }
 
       // Update local form data
@@ -415,15 +468,27 @@ const ComprehensiveStudentProfile = ({ studentId }: ComprehensiveStudentProfileP
       }));
       setEditingField(null);
       
+      console.log('✅ Field update completed successfully');
       toast({ 
         title: 'Updated', 
         description: `${fieldName.replace('_', ' ')} updated successfully` 
       });
     } catch (error) {
-      console.error('Error updating field:', error);
+      console.error('❌ Error updating field:', error);
+      
+      // Provide more detailed error information
+      if (error && typeof error === 'object') {
+        console.error('Error details:', {
+          message: (error as any).message,
+          code: (error as any).code,
+          details: (error as any).details,
+          hint: (error as any).hint
+        });
+      }
+      
       toast({ 
         title: 'Error', 
-        description: 'Failed to update field', 
+        description: `Failed to update ${fieldName.replace('_', ' ')}: ${(error as any)?.message || 'Unknown error'}`, 
         variant: 'destructive' 
       });
     } finally {
