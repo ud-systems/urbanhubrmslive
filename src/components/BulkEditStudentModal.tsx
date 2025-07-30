@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -59,6 +59,9 @@ const BulkEditStudentModal = ({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Bulk Edit Students ({selectedStudents.length} selected)</DialogTitle>
+          <DialogDescription>
+            Update multiple students at once. Leave fields blank to skip changes for that field.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-lg">

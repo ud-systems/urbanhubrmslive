@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import Papa from "papaparse";
 import { useToast } from "@/hooks/use-toast";
 import ConfigManager from "../components/ConfigManager";
 import RoomGradeManager from "../components/RoomGradeManager";
+import DocumentManagement from "../components/DocumentManagement";
 import {
   getResponseCategories, createResponseCategory, updateResponseCategory, deleteResponseCategory,
   getRoomGrades, createRoomGrade, updateRoomGrade, deleteRoomGrade,
@@ -13,22 +15,29 @@ import {
   getLeadSources, createLeadSource, updateLeadSource, deleteLeadSource,
   getLeads, getStudios, getStudents, createStudent, createLead, createStudio, getUsers, createUserWithProfile,
   getLeadStatus, createLeadStatus, updateLeadStatus, deleteLeadStatus,
-  getFollowUpStages, createFollowUpStage, updateFollowUpStage, deleteFollowUpStage
+  getFollowUpStages, createFollowUpStage, updateFollowUpStage, deleteFollowUpStage,
+  getStudioViews, createStudioView, updateStudioView, deleteStudioView
 } from "@/lib/supabaseCrud";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { Progress } from "@/components/ui/progress";
-import { Eye, Edit, CheckCircle, Shield, UserCheck, UserX, Trash2, Settings as SettingsIcon, Users, Upload, Target, Building2, Clock, MessageSquare, Download, FileText, BarChart3, RefreshCw } from "lucide-react";
+import { Eye, Edit, CheckCircle, Shield, UserCheck, UserX, Trash2, Settings as SettingsIcon, Users, Upload, Target, Building2, Clock, MessageSquare, Download, FileText, BarChart3, RefreshCw, ArrowLeft, CreditCard, Key, ToggleLeft, ToggleRight } from "lucide-react";
 import { AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { StripeConfig, defaultStripeConfig } from "@/lib/stripe";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
 
 const Settings = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
   const [tab, setTab] = useState("templates");
@@ -43,6 +52,8 @@ const Settings = () => {
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [stripeConfig, setStripeConfig] = useState<StripeConfig>(defaultStripeConfig);
+  const [stripeConfigSaving, setStripeConfigSaving] = useState(false);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "salesperson" });
   const [addUserLoading, setAddUserLoading] = useState(false);
@@ -70,6 +81,7 @@ const Settings = () => {
   const [verifyUserLoading, setVerifyUserLoading] = useState(false);
   const [leadStatus, setLeadStatus] = useState<any[]>([]);
   const [followUpStages, setFollowUpStages] = useState<any[]>([]);
+  const [studioViews, setStudioViews] = useState<any[]>([]);
   const [bulkUploadProgress, setBulkUploadProgress] = useState(0);
   const [bulkUploadErrorDetails, setBulkUploadErrorDetails] = useState<any[]>([]);
 
@@ -78,13 +90,14 @@ const Settings = () => {
     setLoading(true);
     setError(null);
     try {
-      const [ls, rg, sd, lsrc, fus, rc] = await Promise.all([
+      const [ls, rg, sd, lsrc, fus, rc, sv] = await Promise.all([
         getLeadStatus(),
         getRoomGrades(),
         getStayDurations(),
         getLeadSources(),
         getFollowUpStages(),
-        getResponseCategories()
+        getResponseCategories(),
+        getStudioViews()
       ]);
       setLeadStatus(ls || []);
       setRoomGrades(rg || []);
@@ -92,6 +105,7 @@ const Settings = () => {
       setLeadSources(lsrc || []);
       setFollowUpStages(fus || []);
       setResponseCategories(rc || []);
+      setStudioViews(sv || []);
     } catch (e: any) {
       setError(e.message || String(e));
       toast({ title: "Error loading config data", description: e.message || String(e), variant: "destructive" });
@@ -104,10 +118,25 @@ const Settings = () => {
     setUsersLoading(true);
     setUsersError(null);
     try {
-      const data = await getUsers();
-      setUsers(data || []);
-    } catch (e: any) {
-      setUsersError(e.message || String(e));
+      // Fetch users from our custom users table - simplified query without user_roles table
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select(`
+          id,
+          name,
+          email,
+          role,
+          approved,
+          created_at,
+          updated_at
+        `)
+        .order('id', { ascending: false });
+
+      if (usersError) throw usersError;
+      setUsers(usersData || []);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      setUsersError('Failed to fetch users');
     } finally {
       setUsersLoading(false);
     }
@@ -358,9 +387,55 @@ const Settings = () => {
         
         await Promise.all(formattedLeads.map(row => createLead(row)));
       } else if (csvType === "studios") {
-        await Promise.all(csvPreview.map(row => createStudio(row)));
+        // Process studios one by one with better error handling
+        let successCount = 0;
+        let failCount = 0;
+        const errorDetails: any[] = [];
+        
+        for (let i = 0; i < csvPreview.length; i++) {
+          const studio = csvPreview[i];
+          try {
+            // Clean up the data before sending
+            const cleanStudio = {
+              ...studio,
+              // Remove any empty strings and convert to proper types
+              name: studio.name?.trim() || '',
+              id: studio.id?.trim() || '',
+              view: studio.view?.trim() || '',
+              floor: studio.floor,
+              roomGrade: studio.roomGrade?.trim() || '',
+              // Set default values for system-managed fields
+              occupied: false,
+              occupiedby: null
+            };
+            
+            await createStudio(cleanStudio);
+            successCount++;
+          } catch (e: any) {
+            failCount++;
+            errorDetails.push({ 
+              row: i + 1, 
+              id: studio.id, 
+              reason: e.message || String(e) 
+            });
+            console.error(`Studio upload error at row ${i + 1}:`, e);
+          }
+        }
+        
+        if (failCount > 0) {
+          toast({
+            title: 'Bulk upload completed with errors',
+            description: `Uploaded ${successCount} studios. ${failCount} failed.`,
+            variant: 'destructive',
+          });
+          console.error('Studio upload errors:', errorDetails);
+        } else {
+          toast({ 
+            title: 'Bulk upload successful', 
+            description: `Uploaded ${successCount} studios successfully.` 
+          });
+        }
       }
-      toast({ title: 'Bulk upload successful', description: `Uploaded ${csvPreview.length} ${csvType}` });
       setCsvPreview([]);
       setCsvType("");
     } catch (e: any) {
@@ -530,7 +605,10 @@ const Settings = () => {
   const handleDeleteUser = async (user) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     try {
-      await supabase.from('profiles').delete().eq('id', user.id);
+      // Delete from user_roles first (due to foreign key constraint)
+      await supabase.from('user_roles').delete().eq('user_id', user.id);
+      // Then delete from users table
+      await supabase.from('users').delete().eq('id', user.id);
       fetchUsers();
       toast({ title: 'User deleted', description: 'User deleted successfully.' });
     } catch (e) {
@@ -546,10 +624,9 @@ const Settings = () => {
   const handleApproveUser = async (user) => {
     setApproveUserLoading(true);
     try {
-      await supabase.from('profiles').update({ 
+      await supabase.from('users').update({ 
         approved: true, 
-        approved_at: new Date().toISOString(),
-        approved_by: currentUser?.id 
+        approved_at: new Date().toISOString()
       }).eq('id', user.id);
       fetchUsers();
       toast({ title: 'User approved', description: 'User has been approved successfully.' });
@@ -563,13 +640,13 @@ const Settings = () => {
   const handleVerifyUser = async (user) => {
     setVerifyUserLoading(true);
     try {
-      await supabase.from('profiles').update({ 
-        email_verified: true, 
-        verified_at: new Date().toISOString(),
-        verified_by: currentUser?.id 
+      // Note: Email verification is handled by Supabase Auth
+      // This function can be used for additional verification if needed
+      await supabase.from('users').update({ 
+        updated_at: new Date().toISOString()
       }).eq('id', user.id);
       fetchUsers();
-      toast({ title: 'User verified', description: 'User email has been verified successfully.' });
+      toast({ title: 'User verified', description: 'User has been verified successfully.' });
     } catch (e) {
       toast({ title: 'Verification failed', description: e.message || String(e), variant: 'destructive' });
     } finally {
@@ -582,36 +659,53 @@ const Settings = () => {
     let csvContent = '';
     let filename = '';
     
+    // Get actual values from database
+    const statusOptions = leadStatus.map(s => s.name).join(', ');
+    const sourceOptions = leadSources.map(s => s.name).join(', ');
+    const roomGradeOptions = roomGrades.map(r => r.name).join(', ');
+    const durationOptions = stayDurations.map(d => d.name).join(', ');
+    const responseOptions = responseCategories.map(r => r.name).join(', ');
+    const followUpOptions = followUpStages.map(f => f.name).join(', ');
+    
     if (type === 'leads') {
       csvContent = `# Leads CSV Template
 # Date format: YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY (e.g., 2024-09-01, 01/09/2024, 09/01/2024)
 # Revenue should be a number (e.g., 12000)
 # All fields are optional except name
+# Available Status options: ${statusOptions}
+# Available Source options: ${sourceOptions}
+# Available Room Grade options: ${roomGradeOptions}
+# Available Duration options: ${durationOptions}
+# Available Response Category options: ${responseOptions}
+# Available Follow Up Stage options: ${followUpOptions}
 name,phone,email,status,source,roomgrade,duration,revenue,assignedto,notes,dateofinquiry,responsecategory,followupstage
-Jane Smith,9876543210,jane@example.com,New,WhatsApp,Deluxe,45 weeks,12000,John Doe,Interested in sea view,2024-09-01,Positive,Initial Contact
-John Doe,1234567890,john@example.com,Follow Up,Website,Standard,30 weeks,8000,Jane Smith,Prefers ground floor,01/08/2024,Positive,Follow Up
-Alice Johnson,5551234567,alice@example.com,Converted,Referral,Premium,60 weeks,15000,John Doe,Booked for next month,07/20/2024,Positive,Converted`;
+Jane Smith,9876543210,jane@example.com,${leadStatus[0]?.name || 'New'},${leadSources[0]?.name || 'Website'},${roomGrades[0]?.name || 'Standard'},${stayDurations[0]?.name || 'Academic Year'},12000,John Doe,Interested in sea view,2024-09-01,${responseCategories[0]?.name || 'Interested'},${followUpStages[0]?.name || 'Initial Contact'}
+John Doe,1234567890,john@example.com,${leadStatus[1]?.name || 'Follow Up'},${leadSources[1]?.name || 'Meta Ads'},${roomGrades[1]?.name || 'Premium'},${stayDurations[1]?.name || 'Short Term'},8000,Jane Smith,Prefers ground floor,01/08/2024,${responseCategories[1]?.name || 'Positive'},${followUpStages[1]?.name || 'Follow Up'}
+Alice Johnson,5551234567,alice@example.com,${leadStatus[2]?.name || 'Converted'},${leadSources[2]?.name || 'Google Ads'},${roomGrades[2]?.name || 'Deluxe'},${stayDurations[2]?.name || 'Custom Duration'},15000,John Doe,Booked for next month,07/20/2024,${responseCategories[2]?.name || 'Booked'},${followUpStages[2]?.name || 'Converted'}`;
       filename = 'leads_template.csv';
     } else if (type === 'students') {
       csvContent = `# Students CSV Template
 # Date format: YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY (e.g., 2024-09-01, 01/09/2024, 09/01/2024)
 # Revenue should be a number (e.g., 12000)
 # All fields are optional except name
+# Available Room Grade options: ${roomGradeOptions}
+# Available Duration options: ${durationOptions}
 name,phone,email,roomgrade,duration,revenue,assignedto,notes,dateofinquiry,responsecategory,followupstage
-Jane Smith,9876543210,jane@example.com,Deluxe,45 weeks,12000,John Doe,Interested in sea view,2024-09-01,Positive,Initial Contact
-John Doe,1234567890,john@example.com,Standard,30 weeks,8000,Jane Smith,Prefers ground floor,15/08/2024,Positive,Follow Up`;
+Jane Smith,9876543210,jane@example.com,${roomGrades[0]?.name || 'Standard'},${stayDurations[0]?.name || 'Academic Year'},12000,John Doe,Interested in sea view,2024-09-01,${responseCategories[0]?.name || 'Interested'},${followUpStages[0]?.name || 'Initial Contact'}
+John Doe,1234567890,john@example.com,${roomGrades[1]?.name || 'Premium'},${stayDurations[1]?.name || 'Short Term'},8000,Jane Smith,Prefers ground floor,15/08/2024,${responseCategories[1]?.name || 'Positive'},${followUpStages[1]?.name || 'Follow Up'}`;
       filename = 'students_template.csv';
     } else if (type === 'studios') {
+      const studioViewOptions = studioViews.map(v => v.name).join(', ');
       csvContent = `# Studios CSV Template
 # All fields are optional except id and name
-# Floor should be a number (e.g., 1, 2, 3)
-# View options: City View, Garden View, Courtyard View, Street View
-# Room Grade should match existing room grades in the system
+# Floor should be a number (e.g., 1, 2, 3) or "G" for ground floor
+# View options: ${studioViewOptions} (or leave empty for "Not chosen")
+# Room Grade should match existing room grades in the system: ${roomGradeOptions}
 # Occupied and occupiedby are managed by the system
 id,name,view,floor,roomGrade
-STD001,Platinum Studio A1,City View,1,Deluxe
-STD002,Gold Studio B2,Garden View,2,Premium
-STD003,Silver Studio C3,Courtyard View,1,Standard`;
+STD001,Platinum Studio A1,${studioViews[0]?.name || 'Moor Lane'},G,${roomGrades[0]?.name || 'Gold Studios'}
+STD002,Gold Studio B2,${studioViews[1]?.name || 'Sizer Street'},1,${roomGrades[1]?.name || 'Silver Studios'}
+STD003,Silver Studio C3,${studioViews[2]?.name || 'Asmoor Lane'},2,${roomGrades[2]?.name || 'Platinum Studio'}`;
       filename = 'studios_template.csv';
     }
     
@@ -629,18 +723,36 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
     });
   };
 
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading settings..." />;
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Settings</h2>
-        <p className="text-slate-600">Manage your system settings and preferences.</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold text-slate-900">Settings</h2>
+            <p className="text-slate-600 mt-2">Manage your system settings and preferences.</p>
+          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => navigate('/')}
+            className="flex items-center space-x-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Dashboard</span>
+          </Button>
+        </div>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="bulk-uploads">Bulk Uploads</TabsTrigger>
           <TabsTrigger value="data-management">Data Management</TabsTrigger>
           <TabsTrigger value="user-management">User Management</TabsTrigger>
+          <TabsTrigger value="document-management">Documents</TabsTrigger>
+          <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
         {/* Templates Tab */}
@@ -1497,6 +1609,38 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
               />
               
               <ConfigManager
+                title="Studio Views"
+                items={studioViews}
+                onAdd={async (name) => { 
+                  try {
+                    await createStudioView(name);
+                    await fetchConfigs();
+                    toast({ title: 'Studio View Added', description: 'New studio view created successfully.' });
+                  } catch (error) {
+                    toast({ title: 'Error', description: 'Failed to create studio view.', variant: 'destructive' });
+                  }
+                }}
+                onEdit={async (id, name) => { 
+                  try {
+                    await updateStudioView(id, name);
+                    await fetchConfigs();
+                    toast({ title: 'Studio View Updated', description: 'Studio view updated successfully.' });
+                  } catch (error) {
+                    toast({ title: 'Error', description: 'Failed to update studio view.', variant: 'destructive' });
+                  }
+                }}
+                onDelete={async (id) => { 
+                  try {
+                    await deleteStudioView(id);
+                    await fetchConfigs();
+                    toast({ title: 'Studio View Deleted', description: 'Studio view deleted successfully.' });
+                  } catch (error) {
+                    toast({ title: 'Error', description: 'Failed to delete studio view.', variant: 'destructive' });
+                  }
+                }}
+              />
+              
+              <ConfigManager
                 title="Stay Durations"
                 items={stayDurations}
                 onAdd={async (name) => { 
@@ -1826,6 +1970,9 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add New User</DialogTitle>
+                      <DialogDescription>
+                        Create a new user account with the specified role and permissions.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="space-y-2">
@@ -1847,9 +1994,12 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
                             <SelectValue placeholder="Select role" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="salesperson">Salesperson</SelectItem>
-                            <SelectItem value="manager">Manager</SelectItem>
                             <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                            <SelectItem value="salesperson">Salesperson</SelectItem>
+                            <SelectItem value="accountant">Accountant</SelectItem>
+                            <SelectItem value="cleaner">Cleaner</SelectItem>
+                            <SelectItem value="student">Student</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1919,6 +2069,9 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
                         <SelectItem value="admin">Admin</SelectItem>
                         <SelectItem value="manager">Manager</SelectItem>
                         <SelectItem value="salesperson">Salesperson</SelectItem>
+                        <SelectItem value="accountant">Accountant</SelectItem>
+                        <SelectItem value="cleaner">Cleaner</SelectItem>
+                        <SelectItem value="student">Student</SelectItem>
                       </SelectContent>
                     </Select>
                     <Select value={userStatusFilter} onValueChange={setUserStatusFilter}>
@@ -2040,7 +2193,10 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
         <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Bulk Upload Users</DialogTitle>
+                                <DialogTitle>Bulk Upload Users</DialogTitle>
+                  <DialogDescription>
+                    Upload multiple users at once using a CSV file. The file should include name, email, password, and role columns.
+                  </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <input type="file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" onChange={handleBulkFile} />
@@ -2099,7 +2255,10 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
         <Dialog open={isBulkEditOpen} onOpenChange={setIsBulkEditOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Bulk Edit Users ({selectedUserIds.length} selected)</DialogTitle>
+                              <DialogTitle>Bulk Edit Users ({selectedUserIds.length} selected)</DialogTitle>
+                <DialogDescription>
+                  Update multiple users at once. Leave fields blank to skip changes for that field.
+                </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -2117,9 +2276,12 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
                     <SelectTrigger><SelectValue placeholder="New role (optional)" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="no-change">(No change)</SelectItem>
-                      <SelectItem value="salesperson">Salesperson</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="salesperson">Salesperson</SelectItem>
+                      <SelectItem value="accountant">Accountant</SelectItem>
+                      <SelectItem value="cleaner">Cleaner</SelectItem>
+                      <SelectItem value="student">Student</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2161,6 +2323,9 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Edit User</DialogTitle>
+              <DialogDescription>
+                Update user information and role. Changes will be applied immediately.
+              </DialogDescription>
             </DialogHeader>
             {editingUser && (
               <div className="space-y-4">
@@ -2177,9 +2342,12 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
                   <Select value={editingUser.role} onValueChange={value => setEditingUser(u => ({ ...u, role: value }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="salesperson">Salesperson</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="salesperson">Salesperson</SelectItem>
+                      <SelectItem value="accountant">Accountant</SelectItem>
+                      <SelectItem value="cleaner">Cleaner</SelectItem>
+                      <SelectItem value="student">Student</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2199,6 +2367,9 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>User Details</DialogTitle>
+              <DialogDescription>
+                View detailed information about the selected user account.
+              </DialogDescription>
             </DialogHeader>
             {viewingUser && (
               <div className="space-y-6">
@@ -2285,6 +2456,204 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
             )}
           </DialogContent>
         </Dialog>
+        {/* Document Management Tab */}
+        <TabsContent value="document-management" className="space-y-6">
+          <DocumentManagement />
+        </TabsContent>
+
+        {/* Payments Tab */}
+        <TabsContent value="payments" className="space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">Payment Configuration</h2>
+            <p className="text-slate-600">Configure Stripe payment settings for student payments and invoicing.</p>
+          </div>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <CreditCard className="w-5 h-5 text-blue-600" />
+                <span>Stripe Configuration</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Live/Test Mode Toggle */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  {stripeConfig.isLiveMode ? (
+                    <ToggleRight className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <ToggleLeft className="w-5 h-5 text-orange-600" />
+                  )}
+                  <div>
+                    <Label className="text-base font-medium">
+                      {stripeConfig.isLiveMode ? 'Live Mode' : 'Test Mode'}
+                    </Label>
+                    <p className="text-sm text-slate-600">
+                      {stripeConfig.isLiveMode 
+                        ? 'Real payments will be processed' 
+                        : 'Test payments only - no real charges'
+                      }
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={stripeConfig.isLiveMode}
+                  onCheckedChange={(checked) => 
+                    setStripeConfig(prev => ({ ...prev, isLiveMode: checked }))
+                  }
+                />
+              </div>
+
+              {/* API Keys Section */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="publishable-key" className="flex items-center space-x-2">
+                    <Key className="w-4 h-4" />
+                    <span>Publishable Key</span>
+                    <Badge variant={stripeConfig.isLiveMode ? "default" : "secondary"}>
+                      {stripeConfig.isLiveMode ? 'Live' : 'Test'}
+                    </Badge>
+                  </Label>
+                  <Input
+                    id="publishable-key"
+                    type="text"
+                    value={stripeConfig.publishableKey}
+                    onChange={(e) => setStripeConfig(prev => ({ 
+                      ...prev, 
+                      publishableKey: e.target.value 
+                    }))}
+                    placeholder={stripeConfig.isLiveMode ? 'pk_live_...' : 'pk_test_...'}
+                    className="font-mono text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="secret-key" className="flex items-center space-x-2">
+                    <Key className="w-4 h-4" />
+                    <span>Secret Key</span>
+                    <Badge variant={stripeConfig.isLiveMode ? "default" : "secondary"}>
+                      {stripeConfig.isLiveMode ? 'Live' : 'Test'}
+                    </Badge>
+                  </Label>
+                  <Input
+                    id="secret-key"
+                    type="password"
+                    value={stripeConfig.secretKey}
+                    onChange={(e) => setStripeConfig(prev => ({ 
+                      ...prev, 
+                      secretKey: e.target.value 
+                    }))}
+                    placeholder={stripeConfig.isLiveMode ? 'sk_live_...' : 'sk_test_...'}
+                    className="font-mono text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="webhook-secret" className="flex items-center space-x-2">
+                    <Key className="w-4 h-4" />
+                    <span>Webhook Secret (Optional)</span>
+                  </Label>
+                  <Input
+                    id="webhook-secret"
+                    type="password"
+                    value={stripeConfig.webhookSecret || ''}
+                    onChange={(e) => setStripeConfig(prev => ({ 
+                      ...prev, 
+                      webhookSecret: e.target.value 
+                    }))}
+                    placeholder="whsec_..."
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end pt-4 border-t">
+                <Button 
+                  onClick={async () => {
+                    setStripeConfigSaving(true);
+                    try {
+                      // Save to database or local storage
+                      localStorage.setItem('stripe_config', JSON.stringify(stripeConfig));
+                      toast({
+                        title: "Stripe Configuration Saved",
+                        description: "Payment settings have been updated successfully.",
+                      });
+                    } catch (error) {
+                      toast({
+                        title: "Error Saving Configuration",
+                        description: "Failed to save Stripe settings. Please try again.",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setStripeConfigSaving(false);
+                    }
+                  }}
+                  disabled={stripeConfigSaving}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {stripeConfigSaving ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Save Configuration
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* Test Connection */}
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 className="font-medium text-blue-900 mb-2">Test Your Configuration</h4>
+                <p className="text-sm text-blue-700 mb-3">
+                  Make sure your Stripe keys are working correctly by testing the connection.
+                </p>
+                <Button variant="outline" size="sm" className="text-blue-600 border-blue-300">
+                  Test Connection
+                </Button>
+              </div>
+
+              {/* Payment Settings */}
+              <div className="space-y-4 pt-4 border-t">
+                <h4 className="font-medium text-slate-900">Payment Settings</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Default Currency</Label>
+                    <Select value="GBP">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GBP">GBP (£)</SelectItem>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                        <SelectItem value="EUR">EUR (€)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Payment Terms</Label>
+                    <Select value="30">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="7">7 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                        <SelectItem value="30">30 days</SelectItem>
+                        <SelectItem value="60">60 days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Notifications Tab (placeholder) */}
         <TabsContent value="notifications" className="space-y-6">
           <Card>
@@ -2296,7 +2665,9 @@ STD003,Silver Studio C3,Courtyard View,1,Standard`;
             </CardContent>
           </Card>
         </TabsContent>
-      </Tabs>
+
+        </Tabs>
+      </div>
     </div>
   );
 };

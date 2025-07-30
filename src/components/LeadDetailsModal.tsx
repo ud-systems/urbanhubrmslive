@@ -238,6 +238,9 @@ const LeadDetailsModal = ({ lead, isOpen, onClose }: LeadDetailsModalProps) => {
               <Badge className={getStatusColor(lead.status)}>{lead.status}</Badge>
             </div>
           </DialogTitle>
+          <p className="text-sm text-slate-600">
+            View lead details, add comments, and track history.
+          </p>
         </DialogHeader>
 
         <Tabs defaultValue="details" className="flex-1 overflow-hidden">

@@ -43,6 +43,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from "date-fns";
 import { DateRange } from "react-day-picker";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 interface ReportData {
   leads: any[];
@@ -172,9 +173,28 @@ const Reports = () => {
       return { startDate: customDateRange.from, endDate: customDateRange.to };
     }
     
-    const daysAgo = parseInt(dateRange);
-    const startDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
-    return { startDate, endDate: now };
+    // Handle numeric presets (days ago)
+    if (!isNaN(parseInt(dateRange))) {
+      const daysAgo = parseInt(dateRange);
+      const startDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
+      return { startDate, endDate: now };
+    }
+    
+    // Handle text presets
+    switch (dateRange) {
+      case "week":
+        return { startDate: startOfWeek(now), endDate: endOfWeek(now) };
+      case "month":
+        return { startDate: startOfMonth(now), endDate: endOfMonth(now) };
+      case "quarter":
+        return { startDate: startOfQuarter(now), endDate: endOfQuarter(now) };
+      case "year":
+        return { startDate: startOfYear(now), endDate: endOfYear(now) };
+      default:
+        // Fallback to last 30 days
+        const startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+        return { startDate, endDate: now };
+    }
   };
 
   // Calculate metrics based on filtered data
@@ -497,6 +517,10 @@ const Reports = () => {
       default: return "Last 30 days";
     }
   };
+
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading reports..." />;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

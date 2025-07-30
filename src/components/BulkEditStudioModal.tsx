@@ -1,19 +1,10 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-
-interface Studio {
-  id: string;
-  name: string;
-  view: string;
-  floor: number;
-  occupied: boolean;
-  occupiedby: number | null;
-  roomGrade: string;
-}
+import { Studio } from "@/types";
 
 interface BulkEditStudioModalProps {
   isOpen: boolean;
@@ -22,6 +13,7 @@ interface BulkEditStudioModalProps {
   onBulkUpdate: (updates: Partial<Studio>) => void;
   floorOptions: number[];
   roomGrades: any[];
+  studioViews: any[];
 }
 
 const BulkEditStudioModal = ({
@@ -31,14 +23,23 @@ const BulkEditStudioModal = ({
   onBulkUpdate,
   floorOptions,
   roomGrades,
+  studioViews,
 }: BulkEditStudioModalProps) => {
+  // Add safety check for studioViews
+  const safeStudioViews = studioViews || [];
+  console.log('BulkEditStudioModal - studioViews:', safeStudioViews);
   const [bulkUpdates, setBulkUpdates] = useState<Partial<Studio>>({});
   const [loading, setLoading] = useState(false);
 
   const handleBulkUpdate = async () => {
     if (Object.keys(bulkUpdates).length > 0) {
       setLoading(true);
-      await onBulkUpdate(bulkUpdates);
+      // Convert "none" to empty string for database
+      const updates = {
+        ...bulkUpdates,
+        view: bulkUpdates.view === "none" ? "" : bulkUpdates.view
+      };
+      await onBulkUpdate(updates);
       setBulkUpdates({});
       setLoading(false);
       onClose();
@@ -55,6 +56,9 @@ const BulkEditStudioModal = ({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Bulk Edit Studios ({selectedStudios.length} selected)</DialogTitle>
+          <DialogDescription>
+            Update multiple studios at once by selecting new values for floor, view, and room grade.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-lg">
@@ -82,7 +86,9 @@ const BulkEditStudioModal = ({
                 </SelectTrigger>
                 <SelectContent>
                   {floorOptions.map(floor => (
-                    <SelectItem key={floor} value={floor.toString()}>{floor}</SelectItem>
+                    <SelectItem key={floor} value={floor.toString()}>
+                      {floor === 0 ? 'Ground Floor' : `Floor ${floor}`}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -90,16 +96,17 @@ const BulkEditStudioModal = ({
             <div className="space-y-2">
               <Label>View</Label>
               <Select
-                value={bulkUpdates.view || ""}
+                value={bulkUpdates.view || "none"}
                 onValueChange={value => setBulkUpdates(prev => ({ ...prev, view: value }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select new view" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Sea">Sea</SelectItem>
-                  <SelectItem value="City">City</SelectItem>
-                  <SelectItem value="Garden">Garden</SelectItem>
+                  <SelectItem value="none">Not chosen</SelectItem>
+                  {safeStudioViews.map(view => (
+                    <SelectItem key={view.id} value={view.name}>{view.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

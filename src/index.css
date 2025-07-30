@@ -98,8 +98,97 @@ All colors MUST be HSL.
   * {
     @apply border-border;
   }
+}
 
+@layer utilities {
+  /* Custom radial gradient utilities */
+  .bg-gradient-radial {
+    background: radial-gradient(circle, var(--tw-gradient-stops));
+  }
+}
+
+@layer base {
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Mobile-optimized font sizes for better readability */
+@layer utilities {
+  /* Mobile body text and form fields: 10-12px */
+  @media (max-width: 768px) {
+    .text-sm {
+      font-size: 11px !important;
+    }
+    
+    .text-base, .text-md {
+      font-size: 12px !important;
+    }
+    
+    /* Titles and subtitles: 14-18px */
+    .text-lg {
+      font-size: 14px !important;
+    }
+    
+    .text-xl {
+      font-size: 16px !important;
+    }
+    
+    .text-2xl {
+      font-size: 18px !important;
+    }
+    
+    /* Touch-friendly elements */
+    .btn, button, .cursor-pointer {
+      min-height: 44px !important;
+    }
+    
+    /* Dialog animations from bottom */
+    .dialog-content {
+      animation: slide-up 0.3s ease-out;
+      margin-bottom: 0 !important;
+    }
+  }
+  
+  @keyframes slide-up {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* Custom gradient for module selection background */
+.bg-gradient-radial {
+  background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.15) 0%, rgba(147, 51, 234, 0.1) 25%, rgba(236, 72, 153, 0.05) 50%, transparent 70%);
+}
+
+/* Glass morphism effect */
+.glass-morphism {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Improved mobile dialog animations */
+@media (max-width: 768px) {
+  .dialog-content {
+    animation: slideUpMobile 0.3s ease-out;
+    margin-bottom: 0 !important;
+  }
+  
+  @keyframes slideUpMobile {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
   }
 }

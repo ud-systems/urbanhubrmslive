@@ -1,0 +1,33 @@
+---
+alwaysApply: true
+---
+
+Always Install all required dependencies as needed.
+Always aim to solve problems conclusively when raised—this means assessing both the database and codebase before making any implementations.
+Do not perform corrections or changes without having complete context.
+Always build on top of the existing layout and functionalities—do not rewrite from scratch unless explicitly instructed.
+Always improve upon the current system based on new instructions, not overwrite it.
+Always remember previous instructions and remind the user if new commands contradict existing ones.
+Always login to Supabase upon window or environment launch.
+Always build in relation to the live database data, never use mock data.
+Use dummy records in live tables when concept visualization is needed—do not use mock data for visualization purposes.
+Mobile responsiveness columns in desktop rows on mobile, flex on fields, dialog forms enter from bottom and margin bottom zero
+Always Install all required dependencies as needed.
+Always aim to solve problems conclusively when raised—this means assessing both the database and codebase before making any implementations.
+Do not perform corrections or changes without having complete context.
+Always build on top of the existing layout and functionalities—do not rewrite from scratch unless explicitly instructed.
+Always improve upon the current system based on new instructions, not overwrite it.
+Always remember previous instructions and remind the user if new commands contradict existing ones.
+Always login to Supabase upon window or environment launch.
+Always build in relation to the live database data, never use mock data.
+Always Use/create dummy records in live tables when concept visualization is needed — do not use mock data for visualization purposes.
+Always ensure Mobile responsiveness columns in desktop rows on mobile, flex on fields, dialog forms enter from bottom and margin bottom zero
+Always debug code in background make sure ui/ux consistency accross the system.codebase and database are always aligned.
+Always use free recommended libraries so my project is not expensive to run in production.
+Always perform ui research in detail to know if UI/UX concept wont work in production for users.
+Always Make sure all dialog boxes dont have extra unecessary padding and have 2 close buttons, if dialog box is too long implement steps
+Ensure all form fields validations are implemented.
+Always make sure sure crud functionalities are built completely and linking to database not using mockdata.
+always make sure content, sections and cards flex appropriatey based on scren size and content size, where appropriate install carousel dependencies and use them to display information.
+Always make certain where we have back to button always make sure there are on the far right not next to page title and subtitles
+Always make sure every button performs its crud function make sure it maps to database. make sure the re are no broken links or unworking module functionalities or permissions. intermodule communication is perfect and every actions affects the other module intuitively 

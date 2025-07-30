@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Search, 
@@ -17,24 +18,20 @@ import {
   List,
   Edit,
   Trash2,
-  UserCheck
+  UserCheck,
+  HelpCircle
 } from "lucide-react";
 import { getStudios, createStudio, updateStudio, deleteStudio } from "@/lib/supabaseCrud";
 import { useToast } from "@/hooks/use-toast";
 import BulkEditStudioModal from "@/components/BulkEditStudioModal";
-
-interface Studio {
-  id: string;
-  name: string;
-  view: string;
-  floor: number;
-  occupied: boolean;
-  occupiedby: number | null;
-  roomGrade: string;
-}
+import { TableRowSkeleton } from "@/components/LoadingSpinner";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { Studio } from "@/types";
 
 interface StudioManagementProps {
   studios: Studio[];
+  students: any[];
+  tourists: any[];
   onUpdateStudio: (studio: Studio) => void;
   onDeleteStudio: (studioId: string) => void;
   onAddStudio: (studioData: Studio) => void;
@@ -42,11 +39,16 @@ interface StudioManagementProps {
     total: number;
     occupied: number;
     vacant: number;
+    roomGradeStats: any[];
   };
   roomGrades: any[];
+  studioViews: any[];
 }
 
-const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio, onAddStudio, roomGrades }: StudioManagementProps) => {
+const StudioManagement = ({ studios, students, tourists, studioStats, onUpdateStudio, onDeleteStudio, onAddStudio, roomGrades, studioViews }: StudioManagementProps) => {
+  // Add safety check for studioViews
+  const safeStudioViews = studioViews || [];
+  console.log('StudioManagement - studioViews:', safeStudioViews);
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -72,25 +74,35 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
   // Debug logging to see when studios prop changes
   // Studios prop updated
 
-  const filteredStudios = studios.filter(studio => {
+  const filteredStudios = (studios || []).filter(studio => {
     const matchesSearch = (studio.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                          (studio.id?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                          (studio.view?.toLowerCase() || '').includes(searchTerm.toLowerCase());
-    const matchesFloor = floorFilter === "all" || studio.floor.toString() === floorFilter;
+    const matchesFloor = floorFilter === "all" || (studio.floor && studio.floor.toString() === floorFilter);
     const matchesOccupancy = occupancyFilter === "all" || 
                            (occupancyFilter === "occupied" && studio.occupied) ||
                            (occupancyFilter === "vacant" && !studio.occupied);
-    const matchesRoomGrade = roomGradeFilter === "all" || studio.roomGrade === roomGradeFilter;
+    const matchesRoomGrade = roomGradeFilter === "all" || (studio.roomGrade && studio.roomGrade === roomGradeFilter);
     
     return matchesSearch && matchesFloor && matchesOccupancy && matchesRoomGrade;
   });
 
-  const uniqueFloors = [...new Set(studios.map(s => s.floor))].sort();
-  const uniqueRoomGrades = [...new Set(studios.map(s => s.roomGrade).filter(Boolean))].sort();
+  const uniqueFloors = [...new Set((studios || []).map(s => s.floor).filter(floor => floor !== null && floor !== undefined))].sort((a, b) => {
+    // Sort so that 0 (Ground Floor) comes first, then other floors numerically
+    if (a === 0) return -1;
+    if (b === 0) return 1;
+    return a - b;
+  });
+  const uniqueRoomGrades = [...new Set((studios || []).map(s => s.roomGrade).filter(Boolean))].sort();
 
   const handleAddStudio = async () => {
     try {
-      const created = await createStudio(newStudio);
+      // Convert "none" to empty string for database
+      const studioData = {
+        ...newStudio,
+        view: newStudio.view === "none" ? "" : newStudio.view
+      };
+      const created = await createStudio(studioData);
       setIsAddStudioModalOpen(false);
       setNewStudio({
         id: "",
@@ -114,7 +126,12 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
   const handleUpdateStudio = async () => {
     if (editingStudio) {
       try {
-        const updated = await updateStudio(editingStudio.id, editingStudio);
+        // Convert "none" to empty string for database
+        const studioData = {
+          ...editingStudio,
+          view: editingStudio.view === "none" ? "" : editingStudio.view
+        };
+        const updated = await updateStudio(editingStudio.id, studioData);
         setIsEditStudioModalOpen(false);
         setEditingStudio(null);
         onUpdateStudio(updated);
@@ -185,8 +202,8 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
   };
 
   // Calculate room grade occupancy stats
-  const roomGradeStats = roomGrades.map(grade => {
-    const studiosOfGrade = studios.filter(studio => studio.roomGrade === grade.name);
+  const roomGradeStats = (roomGrades || []).map(grade => {
+    const studiosOfGrade = (studios || []).filter(studio => studio.roomGrade && studio.roomGrade === grade.name);
     const occupiedStudios = studiosOfGrade.filter(studio => studio.occupied);
     const stock = grade.stock || 0;
     const occupancyRate = stock > 0 ? (occupiedStudios.length / stock) * 100 : 0;
@@ -199,6 +216,10 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
       occupancyRate: Math.round(occupancyRate)
     };
   });
+
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading studios..." />;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -227,6 +248,31 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
             </Button>
           </div>
 
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all duration-200 hover:scale-105">
+                  <HelpCircle className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-sm p-4">
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-slate-900">Dynamic Room Grade Availability</h4>
+                  <p className="text-sm text-slate-600">
+                    Room grade availability is automatically calculated based on the actual studios in your system. 
+                    This ensures accurate mapping between available studios and student bookings.
+                  </p>
+                  <div className="text-xs text-slate-500 space-y-1">
+                    <p>• <strong>Total:</strong> Number of studios with this room grade</p>
+                    <p>• <strong>Occupied:</strong> Studios currently assigned to students</p>
+                    <p>• <strong>Vacant:</strong> Studios available for new bookings</p>
+                    <p>• <strong>Dynamic Count:</strong> Shows when actual count differs from original setting</p>
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           <Dialog open={isAddStudioModalOpen} onOpenChange={setIsAddStudioModalOpen}>
             <DialogTrigger asChild>
               <Button className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800">
@@ -235,9 +281,12 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add New Studio</DialogTitle>
-              </DialogHeader>
+                      <DialogHeader>
+          <DialogTitle>Add New Studio</DialogTitle>
+          <DialogDescription>
+            Create a new studio with its details including name, view, floor, and room grade.
+          </DialogDescription>
+        </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Studio ID</Label>
@@ -255,18 +304,18 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                     placeholder="e.g., Platinum Studio A1"
                   />
                 </div>
-                <div className="space-y-2">
+                                <div className="space-y-2">
                   <Label>View</Label>
-                  <Select value={newStudio.view} onValueChange={(value) => setNewStudio({...newStudio, view: value})}>
+                  <Select value={newStudio.view || "none"} onValueChange={(value) => setNewStudio({...newStudio, view: value})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select view" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="City View">City View</SelectItem>
-                      <SelectItem value="Garden View">Garden View</SelectItem>
-                      <SelectItem value="Courtyard View">Courtyard View</SelectItem>
-                      <SelectItem value="Street View">Street View</SelectItem>
-                    </SelectContent>
+                                      <SelectContent>
+                    <SelectItem value="none">Not chosen</SelectItem>
+                    {safeStudioViews.map(view => (
+                      <SelectItem key={view.id} value={view.name}>{view.name}</SelectItem>
+                    ))}
+                  </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
@@ -306,9 +355,52 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
         </div>
       </div>
 
+      {/* Overall Studio Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Card className="border-0 shadow-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-blue-100 text-sm">Total Studios</p>
+                <p className="text-2xl font-bold">{studioStats.total}</p>
+              </div>
+              <Building2 className="w-8 h-8 text-blue-200" />
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="border-0 shadow-lg bg-gradient-to-r from-green-500 to-green-600 text-white">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-green-100 text-sm">Vacant</p>
+                <p className="text-2xl font-bold">{studioStats.vacant}</p>
+              </div>
+              <div className="w-8 h-8 bg-green-400 rounded-full flex items-center justify-center">
+                <span className="text-green-800 font-bold text-sm">✓</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="border-0 shadow-lg bg-gradient-to-r from-orange-500 to-orange-600 text-white">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-orange-100 text-sm">Occupied</p>
+                <p className="text-2xl font-bold">{studioStats.occupied}</p>
+              </div>
+              <UserCheck className="w-8 h-8 text-orange-200" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+
+
       {/* Room Grade Stats Cards */}
       <div className="flex flex-wrap gap-4">
-        {roomGradeStats.map((stat) => (
+        {studioStats.roomGradeStats.map((stat) => (
           <Card key={stat.name} className="flex-1 min-w-64 border-0 shadow-lg bg-white/80 backdrop-blur-md hover:shadow-xl transition-all duration-300">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
@@ -317,7 +409,7 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                   <h3 className="font-semibold text-slate-900 text-sm">{stat.name}</h3>
                 </div>
                 <Badge variant="secondary" className="text-xs">
-                  {stat.occupancyRate}%
+                  {stat.total > 0 ? Math.round((stat.occupied / stat.total) * 100) : 0}%
                 </Badge>
               </div>
               
@@ -330,18 +422,32 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div 
                     className={`h-2 rounded-full transition-all duration-300 ${
-                      stat.occupancyRate >= 90 ? 'bg-red-500' :
-                      stat.occupancyRate >= 75 ? 'bg-orange-500' :
-                      stat.occupancyRate >= 50 ? 'bg-yellow-500' : 'bg-green-500'
+                      (stat.total > 0 ? (stat.occupied / stat.total) * 100 : 0) >= 90 ? 'bg-red-500' :
+                      (stat.total > 0 ? (stat.occupied / stat.total) * 100 : 0) >= 75 ? 'bg-orange-500' :
+                      (stat.total > 0 ? (stat.occupied / stat.total) * 100 : 0) >= 50 ? 'bg-yellow-500' : 'bg-green-500'
                     }`}
-                    style={{ width: `${Math.min(stat.occupancyRate, 100)}%` }}
+                    style={{ width: `${Math.min(stat.total > 0 ? (stat.occupied / stat.total) * 100 : 0, 100)}%` }}
                   />
                 </div>
                 
                 <div className="flex justify-between text-xs text-slate-500">
                   <span>Vacant: {stat.vacant}</span>
-                  <span>{stat.occupancyRate}% full</span>
+                  <span>{stat.total > 0 ? Math.round((stat.occupied / stat.total) * 100) : 0}% full</span>
                 </div>
+                
+                {/* Show if dynamic count differs from original stock setting */}
+                {stat.originalStock > 0 && stat.total !== stat.originalStock && (
+                  <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-blue-700">Dynamic Count:</span>
+                      <span className="font-medium text-blue-900">{stat.total} studios</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs mt-1">
+                      <span className="text-blue-600">Original Setting:</span>
+                      <span className="text-blue-800">{stat.originalStock} studios</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -370,7 +476,9 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
               <SelectContent>
                 <SelectItem value="all">All Floors</SelectItem>
                 {uniqueFloors.map(floor => (
-                  <SelectItem key={floor} value={floor.toString()}>Floor {floor}</SelectItem>
+                  <SelectItem key={floor} value={floor?.toString() || ''}>
+                    {floor === 0 ? 'Ground Floor' : `Floor ${floor}`}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -415,10 +523,10 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                     />
                   </TableHead>
                   <TableHead className="font-semibold">Studio</TableHead>
-                  <TableHead className="font-semibold">View</TableHead>
                   <TableHead className="font-semibold">Floor</TableHead>
                   <TableHead className="font-semibold">Room Grade</TableHead>
                   <TableHead className="font-semibold">Status</TableHead>
+                  <TableHead className="font-semibold">Duration</TableHead>
                   <TableHead className="font-semibold">Occupant</TableHead>
                   <TableHead className="font-semibold">Actions</TableHead>
                 </TableRow>
@@ -446,11 +554,8 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-slate-700">{studio.view}</span>
-                    </TableCell>
-                    <TableCell>
                       <Badge variant="outline" className="bg-slate-50 text-slate-700">
-                        Floor {studio.floor}
+                        {studio.floor === 0 ? 'Ground Floor' : `Floor ${studio.floor || 'N/A'}`}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -462,10 +567,34 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                       </Badge>
                     </TableCell>
                     <TableCell>
+                      {studio.occupied && studio.occupiedby ? (
+                        (() => {
+                          const student = students.find(s => s.id === studio.occupiedby);
+                          const tourist = tourists.find(t => t.id === studio.occupiedby);
+                          const occupant = student || tourist;
+                          return occupant?.duration ? (
+                            <span className="text-slate-700 font-medium">{occupant.duration}</span>
+                          ) : (
+                            <span className="text-slate-400 text-sm">Not set</span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       {studio.occupied ? (
                         <div className="flex items-center space-x-2">
                           <Users className="w-4 h-4 text-slate-400" />
-                          <span className="text-slate-700">Student #{studio.occupiedby?.toString().padStart(4, '0')}</span>
+                          <span className="text-slate-700">
+                            {(() => {
+                              const student = students.find(s => s.id === studio.occupiedby);
+                              const tourist = tourists.find(t => t.id === studio.occupiedby);
+                              const occupant = student || tourist;
+                              const type = student ? 'Student' : tourist ? 'Tourist' : 'Occupant';
+                              return `${type} #${studio.occupiedby ? studio.occupiedby.toString().padStart(4, '0') : 'N/A'}`;
+                            })()}
+                          </span>
                         </div>
                       ) : (
                         <span className="text-slate-400">-</span>
@@ -531,16 +660,29 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="text-slate-500 mb-1">View</p>
-                    <p className="font-medium text-slate-900">{studio.view}</p>
-                  </div>
-                  <div>
                     <p className="text-slate-500 mb-1">Floor</p>
-                    <p className="font-medium text-slate-900">Floor {studio.floor}</p>
+                    <p className="font-medium text-slate-900">
+                      {studio.floor === 0 ? 'Ground Floor' : `Floor ${studio.floor}`}
+                    </p>
                   </div>
                   <div>
                     <p className="text-slate-500 mb-1">Room Grade</p>
                     <p className="font-medium text-slate-900">{studio.roomGrade || "Not set"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500 mb-1">Duration</p>
+                    <p className="font-medium text-slate-900">
+                      {studio.occupied && studio.occupiedby ? (
+                        (() => {
+                          const student = students.find(s => s.id === studio.occupiedby);
+                          const tourist = tourists.find(t => t.id === studio.occupiedby);
+                          const occupant = student || tourist;
+                          return occupant?.duration || "Not set";
+                        })()
+                      ) : (
+                        "-"
+                      )}
+                    </p>
                   </div>
                 </div>
 
@@ -567,11 +709,11 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                 )}
 
                 <div className="flex space-x-2">
-                  <Button variant="outline" size="sm" className="flex-1">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleViewStudio(studio)}>
                     <Eye className="w-4 h-4 mr-2" />
                     View
                   </Button>
-                  <Button variant="outline" size="sm" className="flex-1">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleEditStudio(studio)}>
                     <Edit className="w-4 h-4 mr-2" />
                     Edit
                   </Button>
@@ -599,9 +741,12 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
       {/* Edit Studio Modal */}
       <Dialog open={isEditStudioModalOpen} onOpenChange={setIsEditStudioModalOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Studio</DialogTitle>
-          </DialogHeader>
+                  <DialogHeader>
+          <DialogTitle>Edit Studio</DialogTitle>
+          <DialogDescription>
+            Update the studio details including name, view, floor, and room grade.
+          </DialogDescription>
+        </DialogHeader>
           {editingStudio && (
             <div className="space-y-4">
               <div className="space-y-2">
@@ -613,15 +758,15 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
               </div>
               <div className="space-y-2">
                 <Label>View</Label>
-                <Select value={editingStudio.view} onValueChange={(value) => setEditingStudio({...editingStudio, view: value})}>
+                <Select value={editingStudio.view || "none"} onValueChange={(value) => setEditingStudio({...editingStudio, view: value})}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="City View">City View</SelectItem>
-                    <SelectItem value="Garden View">Garden View</SelectItem>
-                    <SelectItem value="Courtyard View">Courtyard View</SelectItem>
-                    <SelectItem value="Street View">Street View</SelectItem>
+                    <SelectItem value="none">Not chosen</SelectItem>
+                    {safeStudioViews.map(view => (
+                      <SelectItem key={view.id} value={view.name}>{view.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -664,9 +809,12 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
       {/* View Studio Modal */}
       <Dialog open={isViewStudioModalOpen} onOpenChange={setIsViewStudioModalOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Studio Details</DialogTitle>
-          </DialogHeader>
+                  <DialogHeader>
+          <DialogTitle>Studio Details</DialogTitle>
+          <DialogDescription>
+            View detailed information about the selected studio.
+          </DialogDescription>
+        </DialogHeader>
           {selectedStudio && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -684,7 +832,9 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
                 </div>
                 <div>
                   <Label className="text-slate-500">Floor</Label>
-                  <p className="font-medium">Floor {selectedStudio.floor}</p>
+                  <p className="font-medium">
+                    {selectedStudio.floor === 0 ? 'Ground Floor' : `Floor ${selectedStudio.floor}`}
+                  </p>
                 </div>
                 <div>
                   <Label className="text-slate-500">Status</Label>
@@ -717,6 +867,7 @@ const StudioManagement = ({ studios, studioStats, onUpdateStudio, onDeleteStudio
         onBulkUpdate={handleBulkEdit}
         floorOptions={uniqueFloors}
         roomGrades={roomGrades}
+        studioViews={studioViews}
       />
 
       {/* Bulk Action Buttons */}

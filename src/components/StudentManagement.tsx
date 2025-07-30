@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -24,11 +25,17 @@ import {
   Clock,
   DollarSign,
   Shield,
-  AlertTriangle
+  AlertTriangle,
+  User
 } from "lucide-react";
-import { getStudents, updateStudent, deleteStudent, createStudent, updateStudio, bulkDeleteStudents } from "@/lib/supabaseCrud";
+import { getStudents, updateStudent, deleteStudent, createStudent, updateStudio, bulkDeleteStudents, createStudentUserAccount, createStudentWithUserAccount, createStudentInvoice } from "@/lib/supabaseCrud";
+import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
 import BulkEditStudentModal from "@/components/BulkEditStudentModal";
+import { TableRowSkeleton } from "@/components/LoadingSpinner";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { ValidatedInput, ValidatedSelectWrapper } from '@/components/ui/validated-input';
+import { validateForm, showValidationErrors, commonRules } from '@/lib/formValidation';
 
 interface Student {
   id: number;
@@ -42,15 +49,7 @@ interface Student {
   assignedto?: string; // Studio ID
 }
 
-interface Studio {
-  id: string;
-  name: string;
-  view: string;
-  floor: number;
-  occupied: boolean;
-  occupiedby: number | null;
-  roomGrade: string;
-}
+import { Studio } from "@/types";
 
 interface StudentManagementProps {
   students: Student[];
@@ -68,6 +67,7 @@ interface StudentManagementProps {
 }
 
 const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDurations, onUpdateStudent, onDeleteStudent, onAddStudent }: StudentManagementProps) => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -92,16 +92,28 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
     revenue: 0,
     assignedto: "",
   });
-  const [selectedRoomGrade, setSelectedRoomGrade] = useState("");
-
+  const [durationType, setDurationType] = useState<string>("");
+  const [checkInDate, setCheckInDate] = useState("");
+  const [checkOutDate, setCheckOutDate] = useState("");
+  const [dailyRate, setDailyRate] = useState(45);
+  const [weeklyRate, setWeeklyRate] = useState(320);
+  const [customWeeks, setCustomWeeks] = useState("");
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [studioSearchTerm, setStudioSearchTerm] = useState("");
+  const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
   const vacantStudios = studios.filter(studio => !studio.occupied);
-  
-  // Get available studios filtered by room grade
-  const getAvailableStudiosByGrade = (roomGrade: string) => {
-    return studios.filter(studio => 
-      !studio.occupied && 
-      studio.roomGrade === roomGrade
-    );
+
+  const calculateRevenue = () => {
+    if (durationType === "short" && checkInDate && checkOutDate) {
+      const days = Math.ceil((new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24));
+      setTotalRevenue(days * dailyRate);
+    } else if (durationType === "45-weeks") {
+      setTotalRevenue(45 * weeklyRate);
+    } else if (durationType === "51-weeks") {
+      setTotalRevenue(51 * weeklyRate);
+    } else if (durationType === "custom" && customWeeks) {
+      setTotalRevenue(parseInt(customWeeks) * weeklyRate);
+    }
   };
 
 
@@ -156,37 +168,129 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       // Get the student to check if they have a studio assignment
       const student = students.find(s => s.id === studentId);
       
-      await deleteStudent(studentId);
-      
       // Clear studio assignment if student was assigned to a studio
       if (student?.assignedto) {
-        await updateStudio(student.assignedto, { 
-          occupied: false, 
-          occupiedby: null 
-        });
+        try {
+          await updateStudio(student.assignedto, { 
+            occupied: false, 
+            occupiedby: null 
+          });
+        } catch (studioError) {
+          console.warn('Failed to update studio occupancy:', studioError);
+        }
       }
       
+      // Delete the student
+      await deleteStudent(studentId);
+      
+      // Call the parent callback to update the main state
       onDeleteStudent(studentId);
+      
       toast({ title: 'Student deleted', description: 'Student deleted successfully.' });
     } catch (e: any) {
+      console.error('Delete student error:', e);
       toast({ title: 'Delete failed', description: e.message || String(e), variant: 'destructive' });
     }
   };
 
   const handleAddStudent = async () => {
+    // Define validation rules with proper typing
+    const validationRules: any = {
+      name: commonRules.name,
+      email: commonRules.email,
+      phone: commonRules.phone,
+      durationType: { required: true },
+      assignedto: { required: true }
+    };
+
+    // Add conditional validation for dates
+    if (durationType === "short" || durationType === "custom") {
+      validationRules.checkin = { required: true };
+      if (durationType === "short") {
+        validationRules.checkout = { required: true };
+      }
+    }
+
+    if (durationType === "custom") {
+      validationRules.customWeeks = { 
+        required: true,
+        custom: (value: any) => !isNaN(Number(value)) && Number(value) > 0
+      };
+    }
+
+    // Validate form data
+    const formData = {
+      ...newStudent,
+      durationType,
+      assignedto: newStudent.assignedto,
+      checkin: checkInDate,
+      checkout: checkOutDate,
+      customWeeks
+    };
+
+    const validation = validateForm(formData, validationRules);
+
+    if (!validation.isValid) {
+      setValidationErrors(validation.errors);
+      showValidationErrors(validation.errors, validation.firstErrorField);
+      return;
+    }
+
+    // Clear validation errors if form is valid
+    setValidationErrors({});
+
     try {
-      const created = await createStudent(newStudent);
+      // Prepare student data with calculated duration and revenue
+      const studentData = {
+        name: newStudent.name,
+        email: newStudent.email,
+        phone: newStudent.phone,
+        assignedto: newStudent.assignedto,
+        checkin: checkInDate || new Date().toISOString().split('T')[0],
+        duration: durationType === "45-weeks" ? "45 weeks" : 
+                  durationType === "51-weeks" ? "51 weeks" : 
+                  durationType === "custom" ? `${customWeeks} weeks` : 
+                  checkInDate && checkOutDate ? `${Math.ceil((new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24))} days` : "",
+        revenue: totalRevenue || 0
+        // Note: Don't include 'room' field as it causes foreign key constraint violations
+        // The 'assignedto' field handles studio assignment
+      };
+
+      // Create student with user account link
+      const result = await createStudentWithUserAccount(studentData);
+      
+      if (!result || !result.success) {
+        const errorMessage = (result as any)?.error || 'Failed to create student with user account';
+        throw new Error(errorMessage);
+      }
       
       // Update studio occupancy if studio is assigned
       if (newStudent.assignedto) {
         await updateStudio(newStudent.assignedto, { 
           occupied: true, 
-          occupiedby: created.id 
+          occupiedby: result.student.id 
         });
       }
+
+      // Automatically create invoice for the student
+      try {
+        await createStudentInvoice(result.student);
+        console.log('Invoice created automatically for student:', result.student.name);
+      } catch (invoiceError) {
+        console.warn('Failed to create automatic invoice:', invoiceError);
+        // Don't fail the student creation if invoice fails
+      }
+
+      // Show success message with login details
+      toast({ 
+        title: 'Student Portal Created', 
+        description: `Student account created with email: ${studentData.email}. Default password: ${result.defaultPassword}` 
+      });
       
-      onAddStudent(created);
+      onAddStudent(result.student);
       setIsAddStudentModalOpen(false);
+      
+      // Reset all form states
       setNewStudent({
         name: "",
         phone: "",
@@ -197,10 +301,24 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
         revenue: 0,
         assignedto: "",
       });
-      setSelectedRoomGrade("");
+      setDurationType("");
+      setCheckInDate("");
+      setCheckOutDate("");
+      setDailyRate(45);
+      setWeeklyRate(320);
+      setCustomWeeks("");
+      setTotalRevenue(0);
+      setStudioSearchTerm("");
+      setValidationErrors({});
+      
       toast({ title: 'Student created', description: 'Student added successfully.' });
     } catch (e: any) {
-      toast({ title: 'Create failed', description: e.message || String(e), variant: 'destructive' });
+      console.error('Student creation error:', e);
+      toast({ 
+        title: 'Create failed', 
+        description: e.message || 'Failed to create student. Please try again.',
+        variant: 'destructive' 
+      });
     }
   };
 
@@ -248,28 +366,40 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
   // Bulk delete
   const handleBulkDelete = async () => {
     try {
-      // Get students to check studio assignments
       const studentsToDelete = students.filter(s => selectedStudents.includes(s.id));
+      const selectedCount = selectedStudents.length;
       
       // Clear studio assignments first
       for (const student of studentsToDelete) {
         if (student.assignedto) {
-          await updateStudio(student.assignedto, { 
-            occupied: false, 
-            occupiedby: null 
-          });
+          try {
+            await updateStudio(student.assignedto, { 
+              occupied: false, 
+              occupiedby: null 
+            });
+          } catch (studioError) {
+            console.warn('Failed to update studio occupancy:', studioError);
+          }
         }
       }
       
       // Delete students
       await bulkDeleteStudents(selectedStudents);
+      
+      // Call the parent callback to update the main state
+      selectedStudents.forEach(studentId => {
+        onDeleteStudent(studentId);
+      });
+      
       setSelectedStudents([]);
       setIsBulkDeleteDialogOpen(false);
+      
       toast({ 
         title: 'Students deleted', 
-        description: `${selectedStudents.length} students have been permanently deleted.` 
+        description: `${selectedCount} students have been permanently deleted.` 
       });
     } catch (e: any) {
+      console.error('Bulk delete error:', e);
       toast({ title: 'Bulk delete failed', description: e.message || String(e), variant: 'destructive' });
     }
   };
@@ -285,6 +415,65 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
       toast({ title: 'Bulk edit failed', description: e.message || String(e), variant: 'destructive' });
     }
   };
+
+  // Create user account for student
+  const handleCreateUserAccount = async (student: Student) => {
+    try {
+      // Check if student already has a user account
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', student.email)
+        .eq('role', 'student')
+        .single();
+
+      if (existingUser) {
+        toast({ 
+          title: 'User Account Exists', 
+          description: 'This student already has a user account.', 
+          variant: 'destructive' 
+        });
+        return;
+      }
+
+      // Create user account for the student
+      const userAccount = await createStudentUserAccount({
+        name: student.name,
+        email: student.email,
+        phone: student.phone
+      });
+      
+      if (userAccount?.success) {
+        // Update student record with user_id
+        await supabase
+          .from('students')
+          .update({ user_id: userAccount.user.id })
+          .eq('id', student.id);
+
+        toast({ 
+          title: 'User Account Created', 
+          description: `Student account created with email: ${student.email}. Default password: ${userAccount.defaultPassword}` 
+        });
+      } else {
+        toast({ 
+          title: 'Creation Failed', 
+          description: 'Failed to create user account for student.', 
+          variant: 'destructive' 
+        });
+      }
+    } catch (error) {
+      console.error('Error creating user account:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to create user account for student.', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading students..." />;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -353,94 +542,217 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
               Add Student
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Add New Student</DialogTitle>
+              <DialogTitle className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-blue-600" />
+                Add New Student
+              </DialogTitle>
+              <p className="text-sm text-slate-600">
+                Add a new student and assign them to a studio with booking details.
+              </p>
             </DialogHeader>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={newStudent.name} onChange={e => setNewStudent(s => ({ ...s, name: e.target.value }))} placeholder="Full name" />
+
+            <div className="space-y-6">
+              {/* Student Information */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ValidatedInput
+                  label="Name"
+                  fieldName="name"
+                  value={newStudent.name}
+                  onChange={e => setNewStudent(s => ({ ...s, name: e.target.value }))}
+                  placeholder="Full name"
+                  required
+                  error={validationErrors.name}
+                />
+                <ValidatedInput
+                  label="Phone"
+                  fieldName="phone"
+                  value={newStudent.phone}
+                  onChange={e => setNewStudent(s => ({ ...s, phone: e.target.value }))}
+                  placeholder="Phone number"
+                  required
+                  error={validationErrors.phone}
+                />
+                <ValidatedInput
+                  label="Email"
+                  fieldName="email"
+                  type="email"
+                  value={newStudent.email}
+                  onChange={e => setNewStudent(s => ({ ...s, email: e.target.value }))}
+                  placeholder="Email address"
+                  required
+                  error={validationErrors.email}
+                />
               </div>
-              <div className="space-y-2">
-                <Label>Phone</Label>
-                <Input value={newStudent.phone} onChange={e => setNewStudent(s => ({ ...s, phone: e.target.value }))} placeholder="Phone number" />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input value={newStudent.email} onChange={e => setNewStudent(s => ({ ...s, email: e.target.value }))} placeholder="Email address" />
-              </div>
-              <div className="space-y-2">
-                <Label>Room Grade</Label>
-                <Select value={selectedRoomGrade} onValueChange={value => {
-                  setSelectedRoomGrade(value);
-                  setNewStudent(s => ({ ...s, room: value, assignedto: "" }));
-                }}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select room grade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roomGrades.map(grade => (
-                      <SelectItem key={grade.name} value={grade.name}>{grade.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Assigned Studio</Label>
+
+              {/* Studio Assignment */}
+              <div className="space-y-4">
+                <Label className="text-base font-medium">Studio Assignment</Label>
                 <Select 
                   value={newStudent.assignedto || "none"} 
-                  onValueChange={value => setNewStudent(s => ({ ...s, assignedto: value === "none" ? "" : value }))}
-                  disabled={!selectedRoomGrade}
+                  onValueChange={value => {
+                    const selectedStudioId = value === "none" ? "" : value;
+                    const selectedStudio = studios.find(s => s.id === selectedStudioId);
+                    setNewStudent(s => ({ 
+                      ...s, 
+                      assignedto: selectedStudioId,
+                      room: selectedStudio?.roomGrade || "" // Auto-populate room grade from selected studio
+                    }));
+                  }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={selectedRoomGrade ? "Select available studio" : "Select room grade first"} />
+                    <SelectValue placeholder="Select available studio" />
                   </SelectTrigger>
                   <SelectContent>
-                    {selectedRoomGrade ? (
-                      getAvailableStudiosByGrade(selectedRoomGrade).map(studio => (
+                    <div className="p-2">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+                        <Input
+                          placeholder="Search studios..."
+                          value={studioSearchTerm}
+                          onChange={(e) => setStudioSearchTerm(e.target.value)}
+                          className="pl-8"
+                        />
+                      </div>
+                    </div>
+                    <SelectItem value="none">No studio assigned</SelectItem>
+                    {studios
+                      .filter(studio => !studio.occupied)
+                      .filter(studio => 
+                        studio.name.toLowerCase().includes(studioSearchTerm.toLowerCase()) ||
+                        (studio.roomGrade || "").toLowerCase().includes(studioSearchTerm.toLowerCase()) ||
+                        studio.floor.toString().includes(studioSearchTerm)
+                      )
+                      .map(studio => (
                         <SelectItem key={studio.id} value={studio.id}>
-                          {studio.name} - Floor {studio.floor} ({studio.view})
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4" />
+                            {studio.name} - Floor {studio.floor === 0 ? 'Ground Floor' : studio.floor} ({studio.roomGrade || 'No grade'})
+                          </div>
                         </SelectItem>
                       ))
-                    ) : (
-                      <SelectItem value="none" disabled>Select room grade first</SelectItem>
-                    )}
+                    }
                   </SelectContent>
                 </Select>
-                {selectedRoomGrade && getAvailableStudiosByGrade(selectedRoomGrade).length === 0 && (
-                  <p className="text-sm text-red-600">No vacant studios available for this room grade</p>
-                )}
+                <div className="space-y-2">
+                  <Label>Room Grade</Label>
+                  <Input
+                    value={newStudent.room || "Not assigned"}
+                    disabled
+                    className="bg-slate-50"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Check-In Date</Label>
-                <Input type="date" value={newStudent.checkin} onChange={e => setNewStudent(s => ({ ...s, checkin: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Duration</Label>
-                <Select value={newStudent.duration} onValueChange={value => setNewStudent(s => ({ ...s, duration: value }))}>
+
+              {/* Duration Selection */}
+              <div className="space-y-4">
+                <Label className="text-base font-medium">Booking Duration</Label>
+                <Select value={durationType} onValueChange={setDurationType}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select duration" />
+                    <SelectValue placeholder="Select duration type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {stayDurations.map(duration => (
-                      <SelectItem key={duration.name} value={duration.name}>{duration.name}</SelectItem>
-                    ))}
+                    <SelectItem value="short">Short Stay (Daily)</SelectItem>
+                    <SelectItem value="45-weeks">45 Weeks</SelectItem>
+                    <SelectItem value="51-weeks">51 Weeks</SelectItem>
+                    <SelectItem value="custom">Custom Duration</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Revenue</Label>
-                <Input type="number" value={newStudent.revenue} onChange={e => setNewStudent(s => ({ ...s, revenue: Number(e.target.value) }))} placeholder="Revenue" />
+
+              {/* Date Inputs */}
+              {(durationType === "short" || durationType === "custom") && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="checkin">Check-in Date</Label>
+                    <Input
+                      id="checkin"
+                      type="date"
+                      value={checkInDate}
+                      onChange={(e) => setCheckInDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="checkout">Check-out Date</Label>
+                    <Input
+                      id="checkout"
+                      type="date"
+                      value={checkOutDate}
+                      onChange={(e) => setCheckOutDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {durationType === "custom" && (
+                <div className="space-y-2">
+                  <Label htmlFor="weeks">Number of Weeks</Label>
+                  <Input
+                    id="weeks"
+                    type="number"
+                    placeholder="Enter number of weeks"
+                    value={customWeeks}
+                    onChange={(e) => setCustomWeeks(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Rate Configuration */}
+              <div className="grid grid-cols-2 gap-4">
+                {durationType === "short" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="daily-rate">Daily Rate (£)</Label>
+                    <Input
+                      id="daily-rate"
+                      type="number"
+                      value={dailyRate}
+                      onChange={(e) => setDailyRate(Number(e.target.value))}
+                    />
+                  </div>
+                )}
+                {(durationType === "45-weeks" || durationType === "51-weeks" || durationType === "custom") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="weekly-rate">Weekly Rate (£)</Label>
+                    <Input
+                      id="weekly-rate"
+                      type="number"
+                      value={weeklyRate}
+                      onChange={(e) => setWeeklyRate(Number(e.target.value))}
+                    />
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button variant="outline" onClick={() => setIsAddStudentModalOpen(false)}>
-                Cancel
+
+              {/* Calculate Button */}
+              <Button onClick={calculateRevenue} variant="outline" className="w-full">
+                <DollarSign className="w-4 h-4 mr-2" />
+                Calculate Total Revenue
               </Button>
-              <Button onClick={handleAddStudent} className="bg-gradient-to-r from-blue-600 to-blue-700">
-                Add Student
-              </Button>
+
+              {/* Total Revenue Display */}
+              {totalRevenue > 0 && (
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-green-900 font-medium">Total Revenue:</span>
+                    <span className="text-2xl font-bold text-green-900">£{totalRevenue.toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex space-x-3">
+                <Button variant="outline" onClick={() => setIsAddStudentModalOpen(false)} className="flex-1">
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleAddStudent} 
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  disabled={!newStudent.name || !durationType || (!checkInDate && durationType !== "45-weeks" && durationType !== "51-weeks")}
+                >
+                  Add Student
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -628,8 +940,26 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                   </TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => navigate(`/student/${student.id}`)}
+                        className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                        title="View Profile"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => handleEditStudent(student)}>
                         <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleCreateUserAccount(student)}
+                        className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                        title="Create User Account"
+                      >
+                        <User className="w-4 h-4" />
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleDeleteStudent(student.id)}>
                         <Trash2 className="w-4 h-4" />
@@ -662,6 +992,9 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Student</DialogTitle>
+            <DialogDescription>
+              Update the student information below. All changes will be saved automatically.
+            </DialogDescription>
           </DialogHeader>
           {editingStudent && (
             <div className="space-y-4">
@@ -687,23 +1020,18 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                 />
               </div>
               <div className="space-y-2">
-                <Label>Room Grade</Label>
-                <Select value={editingStudent.room} onValueChange={value => setEditingStudent({...editingStudent, room: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select room grade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roomGrades.map(grade => (
-                      <SelectItem key={grade.name} value={grade.name}>{grade.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
                 <Label>Assigned Studio</Label>
                 <Select 
                   value={editingStudent.assignedto || "none"} 
-                  onValueChange={value => setEditingStudent({...editingStudent, assignedto: value === "none" ? "" : value})}
+                  onValueChange={value => {
+                    const selectedStudioId = value === "none" ? "" : value;
+                    const selectedStudio = studios.find(s => s.id === selectedStudioId);
+                    setEditingStudent({
+                      ...editingStudent, 
+                      assignedto: selectedStudioId,
+                      room: selectedStudio?.roomGrade || "" // Auto-populate room grade from selected studio
+                    });
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select studio (optional)" />
@@ -712,16 +1040,23 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
                     <SelectItem value="none">No studio assigned</SelectItem>
                     {studios
                       .filter(studio => !studio.occupied || studio.occupiedby === editingStudent.id)
-                      .filter(studio => studio.roomGrade === editingStudent.room)
                       .map(studio => (
                         <SelectItem key={studio.id} value={studio.id}>
-                          {studio.name} - Floor {studio.floor} ({studio.view})
+                          {studio.name} - Floor {studio.floor === 0 ? 'Ground Floor' : `Floor ${studio.floor}`} ({studio.roomGrade || 'No grade'})
                           {studio.occupiedby === editingStudent.id && " (Currently assigned)"}
                         </SelectItem>
                       ))
                     }
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Room Grade</Label>
+                <Input
+                  value={editingStudent.room || "Not assigned"}
+                  disabled
+                  className="bg-slate-50"
+                />
               </div>
               <div className="space-y-2">
                 <Label>Check-In Date</Label>

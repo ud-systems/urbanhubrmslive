@@ -15,6 +15,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import ConversionModal from "@/components/ConversionModal";
 import BulkEditModal from "@/components/BulkEditModal";
+import LeadDetailsModal from "@/components/LeadDetailsModal";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { 
@@ -41,6 +42,8 @@ import { getLeads, createLead, updateLead, deleteLead, bulkUpdateLeads, bulkDele
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { TableRowSkeleton } from "@/components/LoadingSpinner";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 interface Lead {
   id: number;
@@ -59,14 +62,7 @@ interface Lead {
   followupstage: string;
 }
 
-interface Studio {
-  id: string;
-  name: string;
-  view: string;
-  floor: number;
-  occupied: boolean;
-  occupiedby: number | null;
-}
+import { Studio } from "@/types";
 
 interface LeadManagementProps {
   studios: Studio[];
@@ -77,9 +73,11 @@ interface LeadManagementProps {
   stayDurations: any[];
   leadSources: any[];
   salespeople: any[];
+  studioViews: any[];
   onConvertLead: (lead: Lead) => void;
   onUpdateLead: (lead: Lead) => void;
   onDeleteLead: (leadId: number) => void;
+  operationLoading?: string | null;
 }
 
 const LeadManagement = ({ 
@@ -91,6 +89,7 @@ const LeadManagement = ({
   stayDurations,
   leadSources,
   salespeople,
+  studioViews,
   onConvertLead,
   onUpdateLead,
   onDeleteLead
@@ -134,18 +133,19 @@ const LeadManagement = ({
   // Check if user is admin
   const isAdmin = user?.role === 'admin';
 
+  const fetchLeads = async () => {
+    setLoading(true);
+    try {
+      const data = await getLeads();
+      setLeads(data || []);
+    } catch (e: any) {
+      toast({ title: 'Error fetching leads', description: e.message || String(e), variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchLeads = async () => {
-      setLoading(true);
-      try {
-        const data = await getLeads();
-        setLeads(data || []);
-      } catch (e: any) {
-        toast({ title: 'Error fetching leads', description: e.message || String(e), variant: 'destructive' });
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchLeads();
   }, []);
 
@@ -225,7 +225,6 @@ const LeadManagement = ({
   const handleConvertLead = (lead: Lead) => {
     setSelectedLead(lead);
     setIsConversionModalOpen(true);
-    onConvertLead(lead);
   };
 
   const handleEditLead = (lead: Lead) => {
@@ -360,6 +359,10 @@ const LeadManagement = ({
     user: user
   });
 
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading leads..." />;
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -454,6 +457,9 @@ const LeadManagement = ({
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Add New Lead</DialogTitle>
+                <DialogDescription>
+                  Create a new lead with their contact information and preferences.
+                </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -604,16 +610,22 @@ const LeadManagement = ({
             variant="ghost"
             className={`p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white ${getSourceColor(source.source)} flex-1 hover:from-slate-50/50 hover:to-slate-100/50`}
             onClick={() => {
-              // Map source names to routes
+              // Map source names to routes - handle all sources
               const sourceRoutes: { [key: string]: string } = {
                 'WhatsApp': '/sources/whatsapp',
                 'TikTok': '/sources/tiktok',
                 'Meta Ads': '/sources/meta-ads',
-                'Direct': '/sources/direct'
+                'Direct': '/sources/direct',
+                'Website': '/sources/website',
+                'Google Ads': '/sources/google-ads',
+                'Referral': '/sources/referral'
               };
               const route = sourceRoutes[source.source];
               if (route) {
                 navigate(route);
+              } else {
+                // For any other source, navigate to a generic source page with the source as a parameter
+                navigate(`/sources/${source.source.toLowerCase().replace(/\s+/g, '-')}`);
               }
             }}
           >
@@ -833,15 +845,13 @@ const LeadManagement = ({
                         <Button variant="outline" size="sm" onClick={() => handleDeleteLead(lead.id)}>
                           <Trash2 className="w-4 h-4" />
                         </Button>
-                        {lead.status !== "Converted" && (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleConvertLead(lead)}
-                          >
-                            <UserPlus className="w-4 h-4" />
-                          </Button>
-                        )}
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleConvertLead(lead)}
+                        >
+                          <UserPlus className="w-4 h-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -926,17 +936,15 @@ const LeadManagement = ({
                     <Mail className="w-4 h-4 mr-2" />
                     Email
                   </Button>
-                  {lead.status !== "Converted" && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="flex-1"
-                      onClick={() => handleConvertLead(lead)}
-                    >
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Convert
-                    </Button>
-                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={() => handleConvertLead(lead)}
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Convert
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -963,6 +971,9 @@ const LeadManagement = ({
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Lead</DialogTitle>
+            <DialogDescription>
+              Update the lead's information and status.
+            </DialogDescription>
           </DialogHeader>
           {editingLead && (
             <div className="grid grid-cols-2 gap-4">
@@ -1072,64 +1083,25 @@ const LeadManagement = ({
         </DialogContent>
       </Dialog>
 
-      {/* View Lead Modal */}
-      <Dialog open={isViewLeadModalOpen} onOpenChange={setIsViewLeadModalOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Lead Details</DialogTitle>
-          </DialogHeader>
-          {selectedLead && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-500">Name</Label>
-                  <p className="font-medium">{selectedLead.name}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-500">Status</Label>
-                  <Badge className={getStatusColor(selectedLead.status)}>
-                    {selectedLead.status}
-                  </Badge>
-                </div>
-                <div>
-                  <Label className="text-slate-500">Phone</Label>
-                  <p className="font-medium">{selectedLead.phone}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-500">Email</Label>
-                  <p className="font-medium">{selectedLead.email}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-500">Source</Label>
-                  <p className="font-medium">{selectedLead.source}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-500">Response Category</Label>
-                  <p className="font-medium">{selectedLead.responsecategory}</p>
-                </div>
-              </div>
-              {selectedLead.notes && (
-                <div>
-                  <Label className="text-slate-500">Notes</Label>
-                  <p className="bg-slate-50 p-3 rounded-lg">{selectedLead.notes}</p>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="flex justify-end">
-            <Button variant="outline" onClick={() => setIsViewLeadModalOpen(false)}>
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Lead Details Modal */}
+      <LeadDetailsModal
+        lead={selectedLead}
+        isOpen={isViewLeadModalOpen}
+        onClose={() => setIsViewLeadModalOpen(false)}
+      />
 
       <ConversionModal
         lead={selectedLead}
         isOpen={isConversionModalOpen}
-        onClose={() => setIsConversionModalOpen(false)}
+        onClose={() => {
+          setIsConversionModalOpen(false);
+          setSelectedLead(null);
+          // Refresh leads data after conversion
+          fetchLeads();
+        }}
         onConvert={onConvertLead}
         studios={studios}
+        studioViews={studioViews}
       />
 
       <BulkEditModal

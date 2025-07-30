@@ -1,4 +1,6 @@
 import { Lead, Student, User } from '@/types';
+import { supabase } from './supabaseClient';
+import { emailService } from './emailService';
 
 export interface WorkflowTask {
   id: string;
@@ -250,10 +252,32 @@ export class WorkflowEngine {
       createdAt: new Date()
     };
 
-    // TODO: Save task to database
-    console.log('Created task:', task);
-    
-    return task;
+    try {
+      // Save task to database
+      const { error } = await supabase.from('workflow_tasks').insert([{
+        id: task.id,
+        type: task.type,
+        lead_id: task.leadId,
+        assigned_to: task.assignedTo,
+        title: task.title,
+        description: task.description,
+        due_date: task.dueDate.toISOString(),
+        priority: task.priority,
+        status: task.status,
+        created_at: task.createdAt.toISOString()
+      }]);
+      
+      if (error) {
+        console.error('Failed to save task:', error);
+        throw error;
+      }
+      
+      console.log('✅ Task created and saved:', task);
+      return task;
+    } catch (error) {
+      console.error('❌ Failed to create task:', error);
+      throw error;
+    }
   }
 
   private static calculateDueDate(dueDateParam: string): Date {
@@ -274,34 +298,160 @@ export class WorkflowEngine {
   }
 
   private static async sendEmail(params: Record<string, any>, data: any): Promise<void> {
-    // TODO: Implement email sending logic
-    console.log('Sending email:', params, data);
+    try {
+      const templateId = params.template || 'follow_up';
+      const variables = {
+        name: data.name || 'Valued Customer',
+        date: new Date().toLocaleDateString(),
+        phone: data.phone || 'N/A',
+        email: data.email || 'N/A',
+        location: params.location || 'our facilities',
+        price: params.price || 'competitive rates',
+        moveInDate: params.moveInDate || 'flexible',
+        agentName: params.agentName || 'UrbanHub Team',
+        roomType: params.roomType || 'student accommodation',
+        deadline: params.deadline || 'soon',
+        ...params.variables
+      };
+
+      const success = await emailService.sendTemplateEmail(
+        templateId,
+        data.email,
+        variables,
+        data.id
+      );
+
+      if (success) {
+        console.log('✅ Email sent successfully:', { to: data.email, template: templateId });
+      } else {
+        console.error('❌ Failed to send email');
+      }
+    } catch (error) {
+      console.error('❌ Failed to send email:', error);
+    }
   }
 
   private static async updateStatus(params: Record<string, any>, data: any): Promise<void> {
-    // TODO: Implement status update logic
-    console.log('Updating status:', params, data);
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ 
+          status: params.status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', data.id);
+      
+      if (error) {
+        console.error('❌ Failed to update status:', error);
+        throw error;
+      }
+      
+      console.log('✅ Status updated:', params.status);
+    } catch (error) {
+      console.error('❌ Failed to update status:', error);
+      throw error;
+    }
   }
 
   private static async assignLead(params: Record<string, any>, data: any): Promise<void> {
-    // TODO: Implement lead assignment logic
-    console.log('Assigning lead:', params, data);
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ 
+          assignedto: params.assignedTo,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', data.id);
+      
+      if (error) {
+        console.error('❌ Failed to assign lead:', error);
+        throw error;
+      }
+      
+      console.log('✅ Lead assigned to:', params.assignedTo);
+    } catch (error) {
+      console.error('❌ Failed to assign lead:', error);
+      throw error;
+    }
   }
 
   private static async sendNotification(params: Record<string, any>, data: any): Promise<void> {
-    // TODO: Implement notification logic
-    console.log('Sending notification:', params, data);
+    // Notifications system removed - just log the action
+    console.log('📢 Notification action logged:', {
+      userId: params.userId || data.assignedto,
+      title: params.title || 'New Task',
+      message: params.message || 'You have a new task assigned',
+      type: params.type || 'task',
+      data: data
+    });
   }
 
   static async getTasksForUser(userId: string): Promise<WorkflowTask[]> {
-    // TODO: Fetch tasks from database
-    return [];
+    try {
+      const { data, error } = await supabase
+        .from('workflow_tasks')
+        .select('*')
+        .eq('assigned_to', userId)
+        .order('due_date', { ascending: true });
+      
+      if (error) {
+        console.error('❌ Failed to fetch tasks:', error);
+        return [];
+      }
+      
+      return data?.map(task => ({
+        id: task.id,
+        type: task.type,
+        leadId: task.lead_id,
+        assignedTo: task.assigned_to,
+        title: task.title,
+        description: task.description,
+        dueDate: new Date(task.due_date),
+        priority: task.priority,
+        status: task.status,
+        createdAt: new Date(task.created_at),
+        completedAt: task.completed_at ? new Date(task.completed_at) : undefined,
+        notes: task.notes
+      })) || [];
+    } catch (error) {
+      console.error('❌ Failed to fetch tasks:', error);
+      return [];
+    }
   }
 
   static async getOverdueTasks(): Promise<WorkflowTask[]> {
     const now = new Date();
-    // TODO: Fetch overdue tasks from database
-    return [];
+    try {
+      const { data, error } = await supabase
+        .from('workflow_tasks')
+        .select('*')
+        .lt('due_date', now.toISOString())
+        .eq('status', 'Pending')
+        .order('due_date', { ascending: true });
+      
+      if (error) {
+        console.error('❌ Failed to fetch overdue tasks:', error);
+        return [];
+      }
+      
+      return data?.map(task => ({
+        id: task.id,
+        type: task.type,
+        leadId: task.lead_id,
+        assignedTo: task.assigned_to,
+        title: task.title,
+        description: task.description,
+        dueDate: new Date(task.due_date),
+        priority: task.priority,
+        status: task.status,
+        createdAt: new Date(task.created_at),
+        completedAt: task.completed_at ? new Date(task.completed_at) : undefined,
+        notes: task.notes
+      })) || [];
+    } catch (error) {
+      console.error('❌ Failed to fetch overdue tasks:', error);
+      return [];
+    }
   }
 
   static async completeTask(taskId: string, notes?: string): Promise<void> {
@@ -310,8 +460,28 @@ export class WorkflowEngine {
   }
 
   static async createCustomRule(rule: WorkflowRule): Promise<void> {
-    // TODO: Save custom rule to database
-    console.log('Creating custom rule:', rule);
+    try {
+      const { error } = await supabase.from('workflow_rules').insert([{
+        id: rule.id,
+        name: rule.name,
+        trigger: rule.trigger,
+        conditions: rule.conditions,
+        actions: rule.actions,
+        enabled: rule.enabled,
+        priority: rule.priority,
+        created_at: new Date().toISOString()
+      }]);
+      
+      if (error) {
+        console.error('❌ Failed to create custom rule:', error);
+        throw error;
+      }
+      
+      console.log('✅ Custom rule created:', rule.name);
+    } catch (error) {
+      console.error('❌ Failed to create custom rule:', error);
+      throw error;
+    }
   }
 
   static async getWorkflowInsights(): Promise<{
@@ -321,14 +491,81 @@ export class WorkflowEngine {
     averageCompletionTime: number;
     taskDistribution: Record<string, number>;
   }> {
-    // TODO: Calculate workflow insights
-    return {
-      totalTasks: 0,
-      completedTasks: 0,
-      overdueTasks: 0,
-      averageCompletionTime: 0,
-      taskDistribution: {}
-    };
+    try {
+      // Get total tasks
+      const { data: totalTasks, error: totalError } = await supabase
+        .from('workflow_tasks')
+        .select('*', { count: 'exact' });
+      
+      if (totalError) throw totalError;
+      
+      // Get completed tasks
+      const { data: completedTasks, error: completedError } = await supabase
+        .from('workflow_tasks')
+        .select('*', { count: 'exact' })
+        .eq('status', 'Completed');
+      
+      if (completedError) throw completedError;
+      
+      // Get overdue tasks
+      const now = new Date();
+      const { data: overdueTasks, error: overdueError } = await supabase
+        .from('workflow_tasks')
+        .select('*', { count: 'exact' })
+        .lt('due_date', now.toISOString())
+        .eq('status', 'Pending');
+      
+      if (overdueError) throw overdueError;
+      
+      // Calculate average completion time
+      const { data: completionTimes, error: timeError } = await supabase
+        .from('workflow_tasks')
+        .select('created_at, completed_at')
+        .eq('status', 'Completed')
+        .not('completed_at', 'is', null);
+      
+      if (timeError) throw timeError;
+      
+      let averageCompletionTime = 0;
+      if (completionTimes && completionTimes.length > 0) {
+        const totalTime = completionTimes.reduce((sum, task) => {
+          const created = new Date(task.created_at);
+          const completed = new Date(task.completed_at);
+          return sum + (completed.getTime() - created.getTime());
+        }, 0);
+        averageCompletionTime = totalTime / completionTimes.length;
+      }
+      
+      // Get task distribution by type
+      const { data: taskTypes, error: typeError } = await supabase
+        .from('workflow_tasks')
+        .select('type, status');
+      
+      if (typeError) throw typeError;
+      
+      const taskDistribution: Record<string, number> = {};
+      taskTypes?.forEach(task => {
+        const key = `${task.type}_${task.status}`;
+        taskDistribution[key] = (taskDistribution[key] || 0) + 1;
+      });
+      
+      return {
+        totalTasks: totalTasks?.length || 0,
+        completedTasks: completedTasks?.length || 0,
+        overdueTasks: overdueTasks?.length || 0,
+        averageCompletionTime,
+        taskDistribution
+      };
+    } catch (error) {
+      console.error('❌ Failed to get workflow insights:', error);
+      return {
+        totalTasks: 0,
+        completedTasks: 0,
+        overdueTasks: 0,
+        averageCompletionTime: 0,
+        taskDistribution: {}
+      };
+    }
   }
 
   static async generateFollowUpSchedule(lead: Lead): Promise<WorkflowTask[]> {

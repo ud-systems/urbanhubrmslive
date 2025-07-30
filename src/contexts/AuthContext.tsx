@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { authRateLimiter } from '../lib/rateLimiter';
+import type { Session } from '@supabase/supabase-js';
 
 interface User {
   id: string;
@@ -38,57 +39,179 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+// Add simple debounce util at top-level (outside component)
+function debounce(fn: (...args: any[]) => void, delay = 500) {
+  let timer: NodeJS.Timeout | null = null;
+  return (...args: any[]) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// Helper to map Supabase session->User and update state only when changed
+const mapSessionToUser = (session: Session | null): User | null => {
+  if (!session?.user) {
+    return null;
+  }
+  return {
+    id: session.user.id,
+    name: session.user.user_metadata?.name || '',
+    email: session.user.email || '',
+    role: session.user.user_metadata?.role || 'user',
+    avatar: session.user.user_metadata?.avatar_url || undefined,
+  };
+};
+
+// Enhanced session to user mapping that validates against database
+const mapSessionToUserWithValidation = async (session: Session | null, fetchUserProfile: (id: string) => Promise<any>): Promise<User | null> => {
+  if (!session?.user) {
+    return null;
+  }
+  
+  try {
+    // Fetch user profile from database to validate approval status
+    const profile = await fetchUserProfile(session.user.id);
+    
+    if (!profile || !profile.approved) {
+      console.warn('User session exists but profile not approved:', session.user.email);
+      return null;
+    }
+    
+    return {
+      id: session.user.id,
+      name: profile.name || session.user.user_metadata?.name || '',
+      email: session.user.email || '',
+      role: profile.role || session.user.user_metadata?.role || 'user',
+      avatar: session.user.user_metadata?.avatar_url || undefined,
+    };
+  } catch (error) {
+    console.error('Error validating user profile during session restoration:', error);
+    return null;
+  }
+};
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(true); // Track if initial auth check is complete
   const [rateLimitInfo, setRateLimitInfo] = useState({
-    remainingAttempts: 5,
-    resetTime: Date.now() + 60000
+      remainingAttempts: 5,
+      resetTime: Date.now() + 60000
   });
 
   useEffect(() => {
-    // Initialize auth state with Supabase session
+    let mounted = true;
+
     const initAuth = async () => {
-      setLoading(true);
-      const { data, error } = await supabase.auth.getUser();
-      if (data?.user) {
-        // Fetch user profile from your users table if needed
-        setUser({
-          id: data.user.id,
-          name: data.user.user_metadata?.name || '',
-          email: data.user.email || '',
-          role: data.user.user_metadata?.role || '',
-          avatar: data.user.user_metadata?.avatar_url || undefined,
-        });
-        } else {
-        setUser(null);
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          if (mounted) {
+            setUser(null);
+            setLoading(false);
+            setInitializing(false); // Auth initialization complete
+          }
+          return;
         }
-        setLoading(false);
-    };
-    initAuth();
-    // Listen for auth state changes
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUser({
-          id: session.user.id,
-          name: session.user.user_metadata?.name || '',
-          email: session.user.email || '',
-          role: session.user.user_metadata?.role || '',
-          avatar: session.user.user_metadata?.avatar_url || undefined,
-        });
-      } else {
-        setUser(null);
+        
+        if (session) {
+          try {
+            // Simple validation first - just check if user exists in database
+            const profile = await fetchUserProfile(session.user.id);
+            
+            if (profile && profile.approved) {
+              const user = {
+                id: session.user.id,
+                name: profile.name || session.user.user_metadata?.name || '',
+                email: session.user.email || '',
+                role: profile.role || 'user',
+                avatar: session.user.user_metadata?.avatar_url || undefined,
+              };
+              
+              if (mounted) {
+                setUser(user);
+                setLoading(false);
+                setInitializing(false); // Auth initialization complete
+              }
+            } else {
+              console.warn('User not approved or not found in database, clearing session...');
+              await supabase.auth.signOut();
+              if (mounted) {
+                setUser(null);
+                setLoading(false);
+                setInitializing(false); // Auth initialization complete
+              }
+            }
+          } catch (profileError) {
+            console.error('Error validating user profile:', profileError);
+            // Don't clear session for profile errors, just use basic session data
+            const user = {
+              id: session.user.id,
+              name: session.user.user_metadata?.name || '',
+              email: session.user.email || '',
+              role: session.user.user_metadata?.role || 'user',
+              avatar: session.user.user_metadata?.avatar_url || undefined,
+            };
+            
+            if (mounted) {
+              setUser(user);
+              setLoading(false);
+              setInitializing(false); // Auth initialization complete
+            }
+          }
+        } else {
+          if (mounted) {
+            setUser(null);
+            setLoading(false);
+            setInitializing(false); // Auth initialization complete
+          }
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+          setInitializing(false); // Auth initialization complete
+        }
       }
-    });
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (mounted) {
+          if (event === 'SIGNED_OUT') {
+            setUser(null);
+          } else {
+            // For all other events, use simple mapping (don't re-validate on every change)
+            setUser(mapSessionToUser(session));
+          }
+          setLoading(false);
+        }
+      }
+    );
+
+    initAuth();
+
     return () => {
-      listener?.subscription.unsubscribe();
+      mounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (error) throw error;
-    return data;
+    try {
+      const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      if (error) {
+        console.error('Error fetching user profile:', error);
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      console.error('Failed to fetch user profile for ID:', userId, error);
+      throw error;
+    }
   };
 
   const login = async (email: string, password: string) => {
@@ -109,11 +232,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (data.user) {
-        if (!data.user.confirmed_at) {
-          setUser(null);
-          throw new Error('Please verify your email before logging in.');
-        }
+        // Check if user is approved (no email confirmation required)
         const profile = await fetchUserProfile(data.user.id);
+        if (!profile || !profile.approved) {
+          setUser(null);
+          throw new Error('Your account is pending admin approval. Please contact an administrator.');
+        }
         setUser({
           id: data.user.id,
           name: profile.name || '',
@@ -159,8 +283,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       if (error) throw error;
       if (data.user) {
-        // Insert into profiles table using upsert to handle duplicates
-        await supabase.from('profiles').upsert([{ id: data.user.id, name, email, role }], { onConflict: 'id' });
+        // Insert into users table using upsert to handle duplicates
+        await supabase.from('users').upsert([{ 
+          id: data.user.id, 
+          name, 
+          email, 
+          role,
+          approved: true, // Auto-approve for now, can be changed to false for manual approval
+          approved_at: new Date().toISOString()
+        }], { onConflict: 'id' });
         setUser({
           id: data.user.id,
           name,
@@ -186,7 +317,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = async () => {
     setLoading(true);
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Logout error:', error);
+      }
+      setUser(null);
+    } catch (error) {
+      console.error('Logout error:', error);
       setUser(null);
     } finally {
       setLoading(false);
@@ -202,9 +339,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         data: userData,
       });
       if (error) throw error;
-      // Also update the profiles table
+      // Also update the users table
       if (userData.name) {
-        await supabase.from('profiles').update({ name: userData.name }).eq('id', user.id);
+        await supabase.from('users').update({ name: userData.name }).eq('id', user.id);
       }
       setUser({ ...user, ...userData });
     } finally {
@@ -219,7 +356,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signup,
     logout,
     updateProfile,
-    loading,
+    loading: loading || initializing, // Consider auth incomplete if still initializing
     rateLimitInfo
   };
 

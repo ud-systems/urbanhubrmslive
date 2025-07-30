@@ -6,6 +6,7 @@ import { TrendingUp, Users, DollarSign, Target, Calendar, Filter, TrendingDown }
 import { useState, useMemo } from "react";
 import LeadStatusChart from "./LeadStatusChart";
 import SourcePerformanceChart from "./SourcePerformanceChart";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 interface Lead {
   id: number;
@@ -210,6 +211,11 @@ const Analytics = ({ leads, students }: AnalyticsProps) => {
   }, [filteredData, timeFilter]);
 
 
+
+  // Show skeleton if no data is available yet
+  if (!leads || !students) {
+    return <LoadingSpinner fullScreen text="Loading analytics..." />;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

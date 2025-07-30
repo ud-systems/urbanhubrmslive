@@ -1,232 +1,325 @@
 import { supabase } from './supabaseClient';
-import { useAuth } from '@/contexts/AuthContext';
 
 export interface AuditLog {
-  id: number;
+  id: string;
   table_name: string;
-  record_id: string;
-  action: 'INSERT' | 'UPDATE' | 'DELETE';
-  old_data?: any;
-  new_data?: any;
-  user_id: string;
-  user_email: string;
-  timestamp: string;
+  record_id: string | number;
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SELECT';
+  old_values?: Record<string, any>;
+  new_values?: Record<string, any>;
+  user_id?: string;
+  user_email?: string;
   ip_address?: string;
   user_agent?: string;
+  timestamp: Date;
+  changes?: Record<string, { old: any; new: any }>;
 }
 
-export interface AuditFilter {
+export interface AuditQuery {
   table_name?: string;
+  record_id?: string | number;
   action?: string;
   user_id?: string;
-  date_from?: Date;
-  date_to?: Date;
-  record_id?: string;
+  start_date?: Date;
+  end_date?: Date;
+  limit?: number;
+  offset?: number;
 }
 
 export class AuditTrail {
-  static async getAuditLogs(filters: AuditFilter = {}, page = 1, limit = 50): Promise<{
-    data: AuditLog[];
-    total: number;
-    page: number;
-    totalPages: number;
+  private static isEnabled = true;
+
+  static enable() {
+    this.isEnabled = true;
+  }
+
+  static disable() {
+    this.isEnabled = false;
+  }
+
+  static async log(
+    tableName: string,
+    recordId: string | number,
+    action: 'INSERT' | 'UPDATE' | 'DELETE' | 'SELECT',
+    oldValues?: Record<string, any>,
+    newValues?: Record<string, any>,
+    userId?: string
+  ): Promise<void> {
+    if (!this.isEnabled) return;
+
+    try {
+      const changes = this.calculateChanges(oldValues, newValues);
+      
+      const auditLog = {
+        table_name: tableName,
+        record_id: recordId.toString(),
+        action,
+        old_values: oldValues ? JSON.stringify(oldValues) : null,
+        new_values: newValues ? JSON.stringify(newValues) : null,
+        user_id: userId,
+        user_email: await this.getUserEmail(userId),
+        ip_address: this.getClientIP(),
+        user_agent: navigator.userAgent,
+        timestamp: new Date().toISOString(),
+        changes: changes ? JSON.stringify(changes) : null
+      };
+
+      const { error } = await supabase
+        .from('audit_logs')
+        .insert([auditLog]);
+
+      if (error) {
+        console.error('❌ Failed to log audit trail:', error);
+      } else {
+        console.log('✅ Audit log created:', { tableName, recordId, action });
+      }
+    } catch (error) {
+      console.error('❌ Audit trail error:', error);
+    }
+  }
+
+  private static calculateChanges(
+    oldValues?: Record<string, any>,
+    newValues?: Record<string, any>
+  ): Record<string, { old: any; new: any }> | null {
+    if (!oldValues || !newValues) return null;
+
+    const changes: Record<string, { old: any; new: any }> = {};
+    const allKeys = new Set([...Object.keys(oldValues), ...Object.keys(newValues)]);
+
+    for (const key of allKeys) {
+      const oldValue = oldValues[key];
+      const newValue = newValues[key];
+
+      if (oldValue !== newValue) {
+        changes[key] = { old: oldValue, new: newValue };
+      }
+    }
+
+    return Object.keys(changes).length > 0 ? changes : null;
+  }
+
+  private static async getUserEmail(userId?: string): Promise<string | null> {
+    if (!userId) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.error('Failed to get user email:', error);
+        return null;
+      }
+
+      return data?.email || null;
+    } catch (error) {
+      console.error('Error getting user email:', error);
+      return null;
+    }
+  }
+
+  private static getClientIP(): string | null {
+    // In a real application, you'd get this from the server
+    // For now, we'll return null as this is client-side
+    return null;
+  }
+
+  static async query(query: AuditQuery): Promise<AuditLog[]> {
+    try {
+      let supabaseQuery = supabase
+        .from('audit_logs')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      if (query.table_name) {
+        supabaseQuery = supabaseQuery.eq('table_name', query.table_name);
+      }
+
+      if (query.record_id) {
+        supabaseQuery = supabaseQuery.eq('record_id', query.record_id.toString());
+      }
+
+      if (query.action) {
+        supabaseQuery = supabaseQuery.eq('action', query.action);
+      }
+
+      if (query.user_id) {
+        supabaseQuery = supabaseQuery.eq('user_id', query.user_id);
+      }
+
+      if (query.start_date) {
+        supabaseQuery = supabaseQuery.gte('timestamp', query.start_date.toISOString());
+      }
+
+      if (query.end_date) {
+        supabaseQuery = supabaseQuery.lte('timestamp', query.end_date.toISOString());
+      }
+
+      if (query.limit) {
+        supabaseQuery = supabaseQuery.limit(query.limit);
+      }
+
+      if (query.offset) {
+        supabaseQuery = supabaseQuery.range(query.offset, query.offset + (query.limit || 50) - 1);
+      }
+
+      const { data, error } = await supabaseQuery;
+
+      if (error) {
+        console.error('❌ Failed to query audit logs:', error);
+        return [];
+      }
+
+      return data?.map(log => ({
+        id: log.id,
+        table_name: log.table_name,
+        record_id: log.record_id,
+        action: log.action,
+        old_values: log.old_values ? JSON.parse(log.old_values) : undefined,
+        new_values: log.new_values ? JSON.parse(log.new_values) : undefined,
+        user_id: log.user_id,
+        user_email: log.user_email,
+        ip_address: log.ip_address,
+        user_agent: log.user_agent,
+        timestamp: new Date(log.timestamp),
+        changes: log.changes ? JSON.parse(log.changes) : undefined
+      })) || [];
+    } catch (error) {
+      console.error('❌ Audit query error:', error);
+      return [];
+    }
+  }
+
+  static async getAuditSummary(): Promise<{
+    totalLogs: number;
+    logsToday: number;
+    logsThisWeek: number;
+    logsThisMonth: number;
+    topTables: Array<{ table: string; count: number }>;
+    topUsers: Array<{ user: string; count: number }>;
   }> {
-    let query = supabase
-      .from('audit_logs')
-      .select('*', { count: 'exact' });
+    try {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
 
-    // Apply filters
-    if (filters.table_name) {
-      query = query.eq('table_name', filters.table_name);
-    }
-    if (filters.action) {
-      query = query.eq('action', filters.action);
-    }
-    if (filters.user_id) {
-      query = query.eq('user_id', filters.user_id);
-    }
-    if (filters.record_id) {
-      query = query.eq('record_id', filters.record_id);
-    }
-    if (filters.date_from) {
-      query = query.gte('timestamp', filters.date_from.toISOString());
-    }
-    if (filters.date_to) {
-      query = query.lte('timestamp', filters.date_to.toISOString());
-    }
+      // Get total logs
+      const { count: totalLogs } = await supabase
+        .from('audit_logs')
+        .select('*', { count: 'exact', head: true });
 
-    // Apply pagination
-    const start = (page - 1) * limit;
-    const end = start + limit - 1;
-    query = query.range(start, end);
+      // Get logs today
+      const { count: logsToday } = await supabase
+        .from('audit_logs')
+        .select('*', { count: 'exact', head: true })
+        .gte('timestamp', today.toISOString());
 
-    // Order by timestamp descending
-    query = query.order('timestamp', { ascending: false });
+      // Get logs this week
+      const { count: logsThisWeek } = await supabase
+        .from('audit_logs')
+        .select('*', { count: 'exact', head: true })
+        .gte('timestamp', weekAgo.toISOString());
 
-    const { data, error, count } = await query;
+      // Get logs this month
+      const { count: logsThisMonth } = await supabase
+        .from('audit_logs')
+        .select('*', { count: 'exact', head: true })
+        .gte('timestamp', monthAgo.toISOString());
 
-    if (error) {
-      throw new Error(`Failed to fetch audit logs: ${error.message}`);
+      // Get top tables
+      const { data: tableStats } = await supabase
+        .from('audit_logs')
+        .select('table_name')
+        .gte('timestamp', monthAgo.toISOString());
+
+      const tableCounts: Record<string, number> = {};
+      tableStats?.forEach(log => {
+        tableCounts[log.table_name] = (tableCounts[log.table_name] || 0) + 1;
+      });
+
+      const topTables = Object.entries(tableCounts)
+        .map(([table, count]) => ({ table, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      // Get top users
+      const { data: userStats } = await supabase
+        .from('audit_logs')
+        .select('user_email')
+        .gte('timestamp', monthAgo.toISOString())
+        .not('user_email', 'is', null);
+
+      const userCounts: Record<string, number> = {};
+      userStats?.forEach(log => {
+        if (log.user_email) {
+          userCounts[log.user_email] = (userCounts[log.user_email] || 0) + 1;
+        }
+      });
+
+      const topUsers = Object.entries(userCounts)
+        .map(([user, count]) => ({ user, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      return {
+        totalLogs: totalLogs || 0,
+        logsToday: logsToday || 0,
+        logsThisWeek: logsThisWeek || 0,
+        logsThisMonth: logsThisMonth || 0,
+        topTables,
+        topUsers
+      };
+    } catch (error) {
+      console.error('❌ Failed to get audit summary:', error);
+      return {
+        totalLogs: 0,
+        logsToday: 0,
+        logsThisWeek: 0,
+        logsThisMonth: 0,
+        topTables: [],
+        topUsers: []
+      };
     }
-
-    const total = count || 0;
-    const totalPages = Math.ceil(total / limit);
-
-    return {
-      data: data || [],
-      total,
-      page,
-      totalPages
-    };
   }
 
-  static async getRecordHistory(tableName: string, recordId: string): Promise<AuditLog[]> {
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .eq('table_name', tableName)
-      .eq('record_id', recordId)
-      .order('timestamp', { ascending: true });
-
-    if (error) {
-      throw new Error(`Failed to fetch record history: ${error.message}`);
-    }
-
-    return data || [];
+  // Convenience methods for common operations
+  static async logLeadCreated(leadId: number, leadData: any, userId?: string): Promise<void> {
+    await this.log('leads', leadId, 'INSERT', undefined, leadData, userId);
   }
 
-  static async getUserActivity(userId: string, days = 30): Promise<AuditLog[]> {
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - days);
-
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('timestamp', dateFrom.toISOString())
-      .order('timestamp', { ascending: false });
-
-    if (error) {
-      throw new Error(`Failed to fetch user activity: ${error.message}`);
-    }
-
-    return data || [];
+  static async logLeadUpdated(leadId: number, oldData: any, newData: any, userId?: string): Promise<void> {
+    await this.log('leads', leadId, 'UPDATE', oldData, newData, userId);
   }
 
-  static async getSystemActivity(days = 7): Promise<{
-    totalActions: number;
-    actionsByType: Record<string, number>;
-    actionsByUser: Record<string, number>;
-    actionsByTable: Record<string, number>;
-  }> {
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - days);
-
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .gte('timestamp', dateFrom.toISOString());
-
-    if (error) {
-      throw new Error(`Failed to fetch system activity: ${error.message}`);
-    }
-
-    const logs = data || [];
-    
-    const actionsByType = logs.reduce((acc, log) => {
-      acc[log.action] = (acc[log.action] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const actionsByUser = logs.reduce((acc, log) => {
-      acc[log.user_email] = (acc[log.user_email] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const actionsByTable = logs.reduce((acc, log) => {
-      acc[log.table_name] = (acc[log.table_name] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return {
-      totalActions: logs.length,
-      actionsByType,
-      actionsByUser,
-      actionsByTable
-    };
+  static async logLeadDeleted(leadId: number, leadData: any, userId?: string): Promise<void> {
+    await this.log('leads', leadId, 'DELETE', leadData, undefined, userId);
   }
 
-  static async exportAuditLogs(filters: AuditFilter = {}): Promise<string> {
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*');
-
-    if (error) {
-      throw new Error(`Failed to export audit logs: ${error.message}`);
-    }
-
-    // Convert to CSV format
-    const csvHeaders = [
-      'ID',
-      'Table Name',
-      'Record ID',
-      'Action',
-      'User Email',
-      'Timestamp',
-      'Old Data',
-      'New Data'
-    ];
-
-    const csvRows = (data || []).map(log => [
-      log.id,
-      log.table_name,
-      log.record_id,
-      log.action,
-      log.user_email,
-      log.timestamp,
-      JSON.stringify(log.old_data || {}),
-      JSON.stringify(log.new_data || {})
-    ]);
-
-    const csvContent = [
-      csvHeaders.join(','),
-      ...csvRows.map(row => row.join(','))
-    ].join('\n');
-
-    return csvContent;
+  static async logStudentCreated(studentId: number, studentData: any, userId?: string): Promise<void> {
+    await this.log('students', studentId, 'INSERT', undefined, studentData, userId);
   }
-}
 
-// React hook for audit trail
-export const useAuditTrail = () => {
-  const { user } = useAuth();
+  static async logStudentUpdated(studentId: number, oldData: any, newData: any, userId?: string): Promise<void> {
+    await this.log('students', studentId, 'UPDATE', oldData, newData, userId);
+  }
 
-  const getAuditLogs = async (filters: AuditFilter = {}, page = 1, limit = 50) => {
-    return AuditTrail.getAuditLogs(filters, page, limit);
-  };
+  static async logStudentDeleted(studentId: number, studentData: any, userId?: string): Promise<void> {
+    await this.log('students', studentId, 'DELETE', studentData, undefined, userId);
+  }
 
-  const getRecordHistory = async (tableName: string, recordId: string) => {
-    return AuditTrail.getRecordHistory(tableName, recordId);
-  };
+  static async logStudioCreated(studioId: string, studioData: any, userId?: string): Promise<void> {
+    await this.log('studios', studioId, 'INSERT', undefined, studioData, userId);
+  }
 
-  const getUserActivity = async (days = 30) => {
-    if (!user) return [];
-    return AuditTrail.getUserActivity(user.id, days);
-  };
+  static async logStudioUpdated(studioId: string, oldData: any, newData: any, userId?: string): Promise<void> {
+    await this.log('studios', studioId, 'UPDATE', oldData, newData, userId);
+  }
 
-  const getSystemActivity = async (days = 7) => {
-    return AuditTrail.getSystemActivity(days);
-  };
-
-  const exportAuditLogs = async (filters: AuditFilter = {}) => {
-    return AuditTrail.exportAuditLogs(filters);
-  };
-
-  return {
-    getAuditLogs,
-    getRecordHistory,
-    getUserActivity,
-    getSystemActivity,
-    exportAuditLogs
-  };
-}; 
+  static async logStudioDeleted(studioId: string, studioData: any, userId?: string): Promise<void> {
+    await this.log('studios', studioId, 'DELETE', studioData, undefined, userId);
+  }
+} 

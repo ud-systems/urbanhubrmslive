@@ -45,7 +45,7 @@ export const features = {
   realTimeUpdates: true,
   exportData: true,
   userManagement: true,
-  auditTrail: false, // TODO: Implement audit trail
+  auditTrail: true, // ✅ Implemented audit trail
 };
 
 // API configuration

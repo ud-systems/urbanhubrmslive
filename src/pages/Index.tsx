@@ -6,25 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Users, TrendingUp, UserCheck, DollarSign, Bell, LogOut, Filter, Phone, Mail, ChevronDown, ChevronRight, Eye, Edit, Trash2 } from "lucide-react";
+import { Users, TrendingUp, UserCheck, DollarSign, Bell, LogOut, Filter, Phone, Mail, ChevronDown, ChevronRight, Eye, Edit, Trash2, ArrowLeft } from "lucide-react";
 import LeadManagement from "@/components/LeadManagement";
 import StudentManagement from "@/components/StudentManagement";
+import TouristManagement from "@/components/TouristManagement";
 import Analytics from "@/components/Analytics";
+import QuickDataCheck from "@/components/QuickDataCheck";
 import StudioManagement from "@/components/StudioManagement";
 import LeadDetailsModal from "@/components/LeadDetailsModal";
-import Reports from "./Reports";
-import Notifications from "./Notifications";
+
+
 import { useNavigate, useLocation } from "react-router-dom";
-import ProfileDropdown from "@/components/ProfileDropdown";
 import { useAuth } from "@/contexts/AuthContext";
-import { getLeads, getStudents, getStudios, createLead, updateLead, deleteLead, createStudent, updateStudent, deleteStudent, createStudio, updateStudio, deleteStudio, getRoomGrades, getStayDurations, getLeadSources, getUsers, getLeadStatus, getFollowUpStages, getResponseCategories, debugStudentsSchema, debugStudiosSchema } from "@/lib/supabaseCrud";
+import { getLeads, getStudents, getTourists, getStudios, createLead, updateLead, deleteLead, createStudent, updateStudent, deleteStudent, createTourist, updateTourist, deleteTourist, bulkDeleteTourists, createStudio, updateStudio, deleteStudio, getRoomGrades, getStayDurations, getLeadSources, getUsers, getLeadStatus, getFollowUpStages, getResponseCategories, getStudioViews, debugStudentsSchema, debugStudiosSchema, createStudentUserAccount, createStudentWithUserAccount, createStudentInvoice, createTouristInvoice } from "@/lib/supabaseCrud";
 import { addDays, startOfDay, startOfWeek, startOfMonth, startOfYear, isAfter, isBefore, isEqual } from 'date-fns';
+import { logWarn, logError, logInfo } from '@/lib/logger';
 import { Calendar } from "@/components/ui/calendar";
 import { DateRange } from 'react-day-picker';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
-import Settings from "./Settings";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -69,6 +71,7 @@ const Index = () => {
 
   const [leads, setLeads] = useState([]);
   const [students, setStudents] = useState([]);
+  const [tourists, setTourists] = useState([]);
   const [studios, setStudios] = useState([]);
 
   const [responseCategories, setResponseCategories] = useState([]);
@@ -78,138 +81,448 @@ const Index = () => {
   const [roomGrades, setRoomGrades] = useState([]);
   const [stayDurations, setStayDurations] = useState([]);
   const [leadSources, setLeadSources] = useState([]);
+  const [studioViews, setStudioViews] = useState([]);
 
   const [users, setUsers] = useState([]);
   const [salespeople, setSalespeople] = useState([]);
   const statusOptions = ["New", "Hot", "Cold", "Converted", "Dead"];
 
-  useEffect(() => {
-    const fetchAll = async () => {
-      setLeads(await getLeads());
-      setStudents(await getStudents());
-      setStudios(await getStudios());
-      setRoomGrades((await getRoomGrades()) || []);
-      setStayDurations((await getStayDurations()) || []);
-      setLeadSources((await getLeadSources()) || []);
-      setLeadStatus((await getLeadStatus()) || []);
-      setFollowUpStages((await getFollowUpStages()) || []);
-      setResponseCategories((await getResponseCategories()) || []);
-      const allUsers = (await getUsers()) || [];
-      setUsers(allUsers);
-      setSalespeople(allUsers.filter(u => u.role === "salesperson"));
+  // Add loading states for better UX
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [operationLoading, setOperationLoading] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  // Improved data fetching with parallel loading and better error handling
+  const fetchAll = async (isRetry = false) => {
+    if (isRetry) {
+      setRetryCount(prev => prev + 1);
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    // Reduced timeout to 10 seconds
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+      setError('Loading timeout reached. Please check your connection and try again.');
+    }, 10000);
+    
+    try {
+      // PARALLEL fetching instead of sequential - Major Performance Improvement
+      const fetchPromises = [
+        // Core data - fetch in parallel
+        Promise.race([
+          getLeads(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Leads timeout')), 8000))
+        ]).catch(err => {
+          logWarn('Failed to fetch leads:', err.message);
+          return [];
+        }),
+        
+        Promise.race([
+          getStudents(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Students timeout')), 8000))
+        ]).catch(err => {
+          logWarn('Failed to fetch students:', err.message);
+          return [];
+        }),
+        
+        Promise.race([
+          getTourists(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Tourists timeout')), 8000))
+        ]).catch(err => {
+          logWarn('Failed to fetch tourists:', err.message);
+          return [];
+        }),
+        
+        Promise.race([
+          getStudios(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Studios timeout')), 8000))
+        ]).catch(err => {
+          logWarn('Failed to fetch studios:', err.message);
+          return [];
+        })
+      ];
+
+      // Configuration data - can be fetched in parallel with core data
+      const configPromises = [
+        getRoomGrades().catch(() => []),
+        getStayDurations().catch(() => []),
+        getLeadSources().catch(() => []),
+        getLeadStatus().catch(() => []),
+        getFollowUpStages().catch(() => []),
+        getResponseCategories().catch(() => []),
+        getStudioViews().catch(() => [])
+      ];
+
+      // Users data - can be slower
+      const usersPromise = Promise.race([
+        getUsers(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Users timeout')), 8000))
+      ]).catch(err => {
+        logWarn('Failed to fetch users:', err.message);
+        return [];
+      });
+
+      // Execute all core data fetches in parallel
+      const [leadsData, studentsData, touristsData, studiosData] = await Promise.all(fetchPromises);
       
-      // Debug: Check students table schema
-      await debugStudentsSchema();
-      // Debug: Check studios table schema
-      await debugStudiosSchema();
-    };
+      // Set core data immediately
+      setLeads(leadsData || []);
+      setStudents(studentsData || []);
+      setTourists(touristsData || []);
+      setStudios(studiosData || []);
+
+      // Execute configuration fetches in parallel
+      const configResults = await Promise.allSettled(configPromises);
+      
+      // Extract configuration data
+      const [
+        roomGradesResult,
+        stayDurationsResult,
+        leadSourcesResult,
+        leadStatusResult,
+        followUpStagesResult,
+        responseCategoriesResult,
+        studioViewsResult
+      ] = configResults;
+
+      // Set configuration data
+      setRoomGrades(roomGradesResult.status === 'fulfilled' ? roomGradesResult.value || [] : []);
+      setStayDurations(stayDurationsResult.status === 'fulfilled' ? stayDurationsResult.value || [] : []);
+      setLeadSources(leadSourcesResult.status === 'fulfilled' ? leadSourcesResult.value || [] : []);
+      setLeadStatus(leadStatusResult.status === 'fulfilled' ? leadStatusResult.value || [] : []);
+      setFollowUpStages(followUpStagesResult.status === 'fulfilled' ? followUpStagesResult.value || [] : []);
+      setResponseCategories(responseCategoriesResult.status === 'fulfilled' ? responseCategoriesResult.value || [] : []);
+      setStudioViews(studioViewsResult.status === 'fulfilled' ? studioViewsResult.value || [] : []);
+
+      // Fetch users data
+      const usersResult = await usersPromise;
+      setUsers(usersResult || []);
+      setSalespeople((usersResult || []).filter(u => u.role === "salesperson"));
+
+      setLoading(false);
+      setIsInitialLoad(false);
+      setRetryCount(0);
+      
+    } catch (error) {
+      logError('Critical error during data fetch:', error);
+      setError(`Failed to load system data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setLoading(false);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  useEffect(() => {
     fetchAll();
   }, []);
 
-  const handleConvertLead = async (studentData: any) => {
+  const handleConvertLead = async (conversionData: any) => {
     try {
-      const createdStudent = await createStudent(studentData);
-      setStudents(prev => [...prev, createdStudent]);
+      logInfo('Lead conversion data received:', conversionData);
       
-      // Update the lead status to "Converted" - we need to find the lead by matching data
-      const matchingLead = leads.find(lead => 
-        lead.name === studentData.name && 
-        lead.phone === studentData.phone && 
-        lead.email === studentData.email
+      // Check if this is a short-term stay (tourist) or long-term stay (student)
+      const isShortTerm = conversionData.duration && (
+        conversionData.duration.includes('days') || 
+        conversionData.duration.includes('day') ||
+        conversionData.duration.includes('short') ||
+        conversionData.duration === 'short-term'
       );
       
-      if (matchingLead) {
-        await updateLead(matchingLead.id, { status: "Converted" });
-        setLeads(await getLeads());
+      logInfo('Duration:', conversionData.duration);
+      logInfo('Is short term:', isShortTerm);
+
+      if (isShortTerm) {
+        // Convert to tourist
+        const touristData = {
+          name: conversionData.name,
+          phone: conversionData.phone,
+          email: conversionData.email,
+          room: conversionData.room,
+          checkin: conversionData.checkin,
+          checkout: conversionData.checkout || conversionData.checkin, // Use checkin as checkout if not provided
+          duration: conversionData.duration,
+          revenue: conversionData.revenue,
+          assignedto: conversionData.assignedto
+        };
+
+        logInfo('Creating tourist with data:', touristData);
+        const createdTourist = await createTourist(touristData);
+        logInfo('Created tourist:', createdTourist);
+        
+        if (createdTourist) {
+          logInfo('Tourist created successfully, updating state...');
+          setTourists(prev => {
+            const newTourists = [...prev, createdTourist];
+            logInfo('Updated tourists state:', newTourists);
+            return newTourists;
+          });
+          
+          // Auto-create invoice for the new tourist
+          try {
+            await createTouristInvoice(createdTourist);
+            logInfo('Invoice created automatically for new tourist');
+          } catch (invoiceError) {
+            logWarn('Failed to create automatic invoice for tourist:', invoiceError);
+            // Don't fail the tourist creation if invoice fails
+          }
+          
+          // Refresh studios data to show updated occupancy (handled by database triggers)
+          logInfo('Refreshing studios data...');
+          const updatedStudios = await getStudios();
+          setStudios(updatedStudios);
+          logInfo('Tourist conversion completed successfully');
+        } else {
+          logError('Failed to create tourist - no data returned');
+          // Fallback: refresh tourists data
+          const refreshedTourists = await getTourists();
+          setTourists(refreshedTourists || []);
+        }
+      } else {
+        // Convert to student
+        const studentData = {
+          name: conversionData.name,
+          phone: conversionData.phone,
+          email: conversionData.email,
+          room: conversionData.room,
+          assignedto: conversionData.assignedto,
+          checkin: conversionData.checkin,
+          duration: conversionData.duration,
+          revenue: conversionData.revenue,
+          duration_weeks: conversionData.duration_weeks,
+          payment_cycles: conversionData.payment_cycles,
+          payment_plan_id: conversionData.payment_plan_id
+        };
+
+        // Create student with user account link
+        const result = await createStudentWithUserAccount(studentData);
+        
+        if (result?.success) {
+          setStudents(prev => [...prev, result.student]);
+          logInfo('Student with user account created successfully');
+          
+          // Auto-create invoice for the new student
+          try {
+            await createStudentInvoice(result.student);
+            logInfo('Invoice created automatically for new student');
+          } catch (invoiceError) {
+            logError('Failed to create invoice for student:', invoiceError);
+            // Don't fail the whole process if invoice creation fails
+          }
+        } else {
+          logWarn('Failed to create student with user account');
+          return; // Exit early if student creation failed
+        }
+      
+        // Handle studio assignment if provided
+        if (studentData.assignedto && result?.success) {
+          await updateStudio(studentData.assignedto, { 
+            occupied: true, 
+            occupiedby: result.student.id 
+          });
+            
+          // Refresh studios data to show updated occupancy
+          const updatedStudios = await getStudios();
+          setStudios(updatedStudios);
+        }
       }
       
-      // Handle studio assignment if provided
-      if (studentData.assignedto) {
-        await updateStudio(studentData.assignedto, { 
-          occupied: true, 
-          occupiedby: createdStudent.id 
-        });
-        // Refresh studios data to show updated occupancy
-        const updatedStudios = await getStudios();
-        setStudios(updatedStudios);
+      // Delete the lead after successful conversion (works for both students and tourists)
+      if (conversionData.leadId) {
+        logInfo('Deleting lead with ID:', conversionData.leadId);
+        try {
+          await deleteLead(conversionData.leadId);
+          setLeads(prev => prev.filter(l => l.id !== conversionData.leadId));
+          logInfo('Lead deleted successfully');
+        } catch (deleteError) {
+          logError('Failed to delete lead:', deleteError);
+        }
+      } else {
+        logWarn('No leadId provided for deletion');
       }
     } catch (error) {
-      console.error('Error converting lead:', error);
+      logError('Error converting lead:', error);
+      // Show more detailed error information
+      if (error instanceof Error) {
+        logError('Error details:', error.message);
+      }
     }
   };
 
   const handleUpdateLead = async (updatedLead: any) => {
+    setOperationLoading(`updating-lead-${updatedLead.id}`);
+    try {
     await updateLead(updatedLead.id, updatedLead);
+      // Optimistically update local state instead of full refetch
+      setLeads(prev => prev.map(lead => 
+        lead.id === updatedLead.id ? { ...lead, ...updatedLead } : lead
+      ));
+    } catch (error) {
+      logError('Error updating lead:', error);
+      // Fallback to full refetch if optimistic update fails
     setLeads(await getLeads());
+    } finally {
+      setOperationLoading(null);
+    }
   };
 
   const handleDeleteLead = async (leadId: number) => {
+    setOperationLoading(`deleting-lead-${leadId}`);
+    try {
     await deleteLead(leadId);
+      // Optimistically update local state instead of full refetch
+      setLeads(prev => prev.filter(lead => lead.id !== leadId));
+    } catch (error) {
+      logError('Error deleting lead:', error);
+      // Fallback to full refetch if optimistic update fails
     setLeads(await getLeads());
+    } finally {
+      setOperationLoading(null);
+    }
   };
 
   const handleUpdateStudent = async (updatedStudent: any) => {
-    // Get the original student to compare studio assignment
-    const originalStudent = students.find((s: any) => s.id === updatedStudent.id);
-    
-    await updateStudent(updatedStudent.id, updatedStudent);
-    
-    // Handle studio assignment changes
-    if (originalStudent) {
-      if (originalStudent.assignedto !== updatedStudent.assignedto) {
-        // Clear previous studio assignment
-        if (originalStudent.assignedto) {
-          await updateStudio(originalStudent.assignedto, { 
-            occupied: false, 
-            occupiedby: null 
-          });
+    try {
+      // Get the original student to compare studio assignment
+      const originalStudent = students.find((s: any) => s.id === updatedStudent.id);
+      
+      await updateStudent(updatedStudent.id, updatedStudent);
+      
+      // Optimistically update students state
+      setStudents(prev => prev.map(student => 
+        student.id === updatedStudent.id ? { ...student, ...updatedStudent } : student
+      ));
+      
+      // Handle studio assignment changes
+      if (originalStudent) {
+        if (originalStudent.assignedto !== updatedStudent.assignedto) {
+          // Clear previous studio assignment
+          if (originalStudent.assignedto) {
+            try {
+              await updateStudio(originalStudent.assignedto, { 
+                occupied: false, 
+                occupiedby: null 
+              });
+              // Optimistically update studios state
+              setStudios(prev => prev.map(studio => 
+                studio.id === originalStudent.assignedto 
+                  ? { ...studio, occupied: false, occupiedby: null }
+                  : studio
+              ));
+            } catch (studioError) {
+              logWarn('Failed to clear previous studio assignment:', studioError);
+            }
+          }
+          
+          // Set new studio assignment
+          if (updatedStudent.assignedto) {
+            try {
+              await updateStudio(updatedStudent.assignedto, { 
+                occupied: true, 
+                occupiedby: updatedStudent.id 
+              });
+              // Optimistically update studios state
+              setStudios(prev => prev.map(studio => 
+                studio.id === updatedStudent.assignedto 
+                  ? { ...studio, occupied: true, occupiedby: updatedStudent.id }
+                  : studio
+              ));
+            } catch (studioError) {
+              logWarn('Failed to set new studio assignment:', studioError);
+            }
+          }
         }
-        
-        // Set new studio assignment
-        if (updatedStudent.assignedto) {
-          await updateStudio(updatedStudent.assignedto, { 
-            occupied: true, 
-            occupiedby: updatedStudent.id 
-          });
-        }
-        
-        // Refresh studios data to show updated occupancy
-        const updatedStudios = await getStudios();
-        setStudios(updatedStudios);
       }
+    } catch (error) {
+      logError('Error updating student:', error);
+      // Fallback to full refetch if optimistic update fails
+      const [updatedStudents, updatedStudios] = await Promise.all([
+        getStudents(),
+        getStudios()
+      ]);
+      setStudents(updatedStudents);
+      setStudios(updatedStudios);
     }
-    
-    setStudents(await getStudents());
   };
 
   const handleDeleteStudent = async (studentId: number) => {
-    const student = students.find((s: any) => s.id === studentId);
-          if (student?.assignedto) {
-        await updateStudio(student.assignedto, { occupied: false, occupiedby: null });
-        // Refresh studios data to show updated occupancy
-        const updatedStudios = await getStudios();
-        setStudios(updatedStudios);
+    try {
+      const student = students.find((s: any) => s.id === studentId);
+      
+      // Clear studio assignment if student was assigned to a studio
+      if (student?.assignedto) {
+        try {
+          await updateStudio(student.assignedto, { occupied: false, occupiedby: null });
+          // Optimistically update studios state
+          setStudios(prev => prev.map(studio => 
+            studio.id === student.assignedto 
+              ? { ...studio, occupied: false, occupiedby: null }
+              : studio
+          ));
+        } catch (studioError) {
+          logWarn('Failed to update studio occupancy:', studioError);
+        }
       }
-    await deleteStudent(studentId);
-    setStudents(await getStudents());
+      
+      // Delete the student
+      await deleteStudent(studentId);
+      
+      // Optimistically update students state
+      setStudents(prev => prev.filter(student => student.id !== studentId));
+    } catch (error) {
+      logError('Error deleting student:', error);
+      // Fallback to full refetch if optimistic update fails
+      const [updatedStudents, updatedStudios] = await Promise.all([
+        getStudents(),
+        getStudios()
+      ]);
+      setStudents(updatedStudents);
+      setStudios(updatedStudios);
+    }
   };
 
   const handleUpdateStudio = async (updatedStudio: any) => {
+    try {
     await updateStudio(updatedStudio.id, updatedStudio);
+      // Optimistically update local state instead of full refetch
+      setStudios(prev => prev.map(studio => 
+        studio.id === updatedStudio.id ? { ...studio, ...updatedStudio } : studio
+      ));
+    } catch (error) {
+      logError('Error updating studio:', error);
+      // Fallback to full refetch if optimistic update fails
     const updatedStudios = await getStudios();
     setStudios(updatedStudios);
+    }
   };
 
   const handleDeleteStudio = async (studioId: string) => {
+    try {
     await deleteStudio(studioId);
+      // Optimistically update local state instead of full refetch
+      setStudios(prev => prev.filter(studio => studio.id !== studioId));
+    } catch (error) {
+      logError('Error deleting studio:', error);
+      // Fallback to full refetch if optimistic update fails
     const updatedStudios = await getStudios();
     setStudios(updatedStudios);
+    }
   };
 
   const handleAddStudio = async (studioData: any) => {
-    await createStudio(studioData);
+    try {
+      const createdStudio = await createStudio(studioData);
+      // Optimistically update local state instead of full refetch
+      setStudios(prev => [...prev, createdStudio]);
+    } catch (error) {
+      logError('Error adding studio:', error);
+      // Fallback to full refetch if optimistic update fails
     const updatedStudios = await getStudios();
     setStudios(updatedStudios);
+    }
   };
 
   const toggleRowExpansion = (leadId: number) => {
@@ -227,9 +540,7 @@ const Index = () => {
     setIsLeadDetailsOpen(true);
   };
 
-  const handleNotificationClick = () => {
-    navigate('/notifications');
-  };
+
 
   const handleEditLead = (lead: any) => {
     // Implement lead editing logic here
@@ -246,18 +557,36 @@ const Index = () => {
   });
 
   const stats = {
-    totalLeads: filteredLeadsForStats.length,
+    totalLeads: filteredLeadsForStats.length + students.length, // Include both leads and students
     newLeads: filteredLeadsForStats.filter(l => l.status === "New").length,
     hotLeads: filteredLeadsForStats.filter(l => l.status === "Hot").length,
     coldLeads: filteredLeadsForStats.filter(l => l.status === "Cold").length,
-    converted: filteredLeadsForStats.filter(l => l.status === "Converted").length,
+    converted: students.length, // Count students instead of converted leads
     deadLeads: filteredLeadsForStats.filter(l => l.status === "Dead").length,
   };
 
+  // Calculate dynamic room grade availability based on actual studios
+  const roomGradeStats = roomGrades.map(grade => {
+    const studiosOfGrade = studios.filter(s => s.roomGrade === grade.name);
+    const totalStudios = studiosOfGrade.length;
+    const occupiedStudios = studiosOfGrade.filter(s => s.occupied).length;
+    const vacantStudios = totalStudios - occupiedStudios;
+    
+    return {
+      ...grade,
+      total: totalStudios,
+      occupied: occupiedStudios,
+      vacant: vacantStudios,
+      // Keep the original stock for reference, but use dynamic total
+      originalStock: grade.stock || 0
+    };
+  });
+
   const studioStats = {
-    total: studios.length,
-    occupied: studios.filter(s => s.occupied).length,
-    vacant: studios.filter(s => !s.occupied).length
+    total: studios?.length || 0,
+    occupied: studios?.filter(s => s.occupied).length || 0,
+    vacant: studios?.filter(s => !s.occupied).length || 0,
+    roomGradeStats // Add the dynamic room grade stats
   };
 
   // Filter leads for dashboard
@@ -281,42 +610,205 @@ const Index = () => {
     }
   };
 
+  const formatStatValue = (value: number) => {
+    if (value === 0) return "0";
+    if (value >= 1 && value <= 999) {
+      return value.toString().padStart(3, '0');
+    }
+    return value.toString();
+  };
+
+  const handleAddStudent = async (newStudent: any) => {
+    try {
+      // Create student with user account link
+      const result = await createStudentWithUserAccount(newStudent);
+      
+      if (!result?.success) {
+        throw new Error('Failed to create student with user account');
+      }
+      
+      // Update studio occupancy if studio is assigned
+      if (newStudent.assignedto) {
+        try {
+          await updateStudio(newStudent.assignedto, { 
+            occupied: true, 
+            occupiedby: result.student.id 
+          });
+          // Refresh studios data to show updated occupancy
+          const updatedStudios = await getStudios();
+          setStudios(updatedStudios);
+        } catch (studioError) {
+          logWarn('Failed to update studio occupancy:', studioError);
+        }
+      }
+      
+      // Refresh students data
+      const updatedStudents = await getStudents();
+      setStudents(updatedStudents);
+    } catch (error) {
+      logError('Error adding student:', error);
+    }
+  };
+
+  const handleAddTourist = async (newTourist: any) => {
+    try {
+      const createdTourist = await createTourist(newTourist);
+      
+      // Update studio occupancy if studio is assigned
+      if (newTourist.assignedto) {
+        try {
+          await updateStudio(newTourist.assignedto, { 
+            occupied: true, 
+            occupiedby: createdTourist.id 
+          });
+          // Refresh studios data to show updated occupancy
+          const updatedStudios = await getStudios();
+          setStudios(updatedStudios);
+        } catch (studioError) {
+          logWarn('Failed to update studio occupancy:', studioError);
+        }
+      }
+      
+      // Refresh tourists data
+      const updatedTourists = await getTourists();
+      setTourists(updatedTourists);
+    } catch (error) {
+      logError('Error adding tourist:', error);
+    }
+  };
+
+  const handleUpdateTourist = async (updatedTourist: any) => {
+    try {
+      // Get the original tourist to compare studio assignment
+      const originalTourist = tourists.find(t => t.id === updatedTourist.id);
+      
+      const updated = await updateTourist(updatedTourist.id, updatedTourist);
+      
+      // Handle studio assignment changes
+      if (originalTourist) {
+        // If studio assignment changed, update studio occupancy
+        if (originalTourist.assignedto !== updatedTourist.assignedto) {
+          // Clear previous studio assignment
+          if (originalTourist.assignedto) {
+            await updateStudio(originalTourist.assignedto, { 
+              occupied: false, 
+              occupiedby: null 
+            });
+          }
+          
+          // Set new studio assignment
+          if (updatedTourist.assignedto) {
+            await updateStudio(updatedTourist.assignedto, { 
+              occupied: true, 
+              occupiedby: updatedTourist.id 
+            });
+          }
+        }
+      }
+      
+      // Refresh tourists data
+      const updatedTourists = await getTourists();
+      setTourists(updatedTourists);
+      
+      // Refresh studios data to show updated occupancy
+      const updatedStudios = await getStudios();
+      setStudios(updatedStudios);
+    } catch (error) {
+      logError('Error updating tourist:', error);
+    }
+  };
+
+  const handleDeleteTourist = async (touristId: number) => {
+    try {
+      // Get the tourist to check if they have a studio assignment
+      const tourist = tourists.find(t => t.id === touristId);
+      
+      // Clear studio assignment if tourist was assigned to a studio
+      if (tourist?.assignedto) {
+        try {
+          await updateStudio(tourist.assignedto, { 
+            occupied: false, 
+            occupiedby: null 
+          });
+        } catch (studioError) {
+          logWarn('Failed to update studio occupancy:', studioError);
+        }
+      }
+      
+      // Delete the tourist
+      await deleteTourist(touristId);
+      
+      // Refresh tourists data
+      const updatedTourists = await getTourists();
+      setTourists(updatedTourists);
+      
+      // Refresh studios data to show updated occupancy
+      const updatedStudios = await getStudios();
+      setStudios(updatedStudios);
+    } catch (error) {
+      logError('Error deleting tourist:', error);
+    }
+  };
+
+
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 font-inter-tight">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4 sticky top-0 z-50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold text-sm">SA</span>
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">Student Accommodation Hub</h1>
-              <p className="text-sm text-slate-500">Lead & Booking Management</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm" className="relative" onClick={handleNotificationClick}>
-              <Bell className="w-4 h-4" />
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-            </Button>
-            <ProfileDropdown />
-          </div>
-        </div>
-      </header>
-
       {/* Main Content */}
       <main className="p-6">
-        <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7 bg-white/80 backdrop-blur-md border border-slate-200/60 p-1 shadow-sm">
+        {/* Loading State */}
+        {loading && <LoadingSpinner fullScreen text="Loading dashboard..." />}
+
+        {/* Error State */}
+        {error && !loading && (
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <div className="text-red-500 mb-4">
+                <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <p className="text-red-600 font-medium mb-2">Failed to load data</p>
+              <p className="text-slate-600 mb-4">{error}</p>
+              <div className="space-x-2">
+              <Button onClick={() => window.location.reload()} variant="outline">
+                  Refresh Page
+                </Button>
+                <Button onClick={() => fetchAll(true)} variant="default">
+                  Retry
+              </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Content */}
+        {!loading && !error && (
+          <>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="text-3xl font-bold text-slate-900">Reservations</h1>
+                <p className="text-slate-600 mt-2">Manage leads, students, and studio bookings.</p>
+              </div>
+              <Button 
+                variant="outline" 
+                onClick={() => navigate('/')}
+                className="flex items-center space-x-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Dashboard</span>
+              </Button>
+            </div>
+            
+            <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-6 bg-white/80 backdrop-blur-md border border-slate-200/60 p-1 shadow-sm">
             <TabsTrigger value="dashboard" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Dashboard</TabsTrigger>
             <TabsTrigger value="leads" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Leads</TabsTrigger>
             <TabsTrigger value="students" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Students</TabsTrigger>
+            <TabsTrigger value="tourists" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Tourists</TabsTrigger>
             <TabsTrigger value="studios" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Studios</TabsTrigger>
             <TabsTrigger value="analytics" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Analytics</TabsTrigger>
-            <TabsTrigger value="reports" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Reports</TabsTrigger>
-            <TabsTrigger value="settings" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:to-blue-700 data-[state=active]:text-white">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6 animate-fade-in">
@@ -357,90 +849,117 @@ const Index = () => {
               </Popover>
             </div>
 
-            {/* Stats Cards - with all required stats except total revenue */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
+
+
+
+            {/* Stats Cards - New Design */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
               <Button
                 variant="ghost"
-                className="p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-green-50/30 hover:from-green-50/50 hover:to-green-100/50"
+                className="p-0 h-auto border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl w-full justify-start"
                 onClick={() => navigate("/leads/new")}
               >
-                <Card className="border-0 bg-transparent">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-600">New Leads</CardTitle>
-                    <Users className="h-4 w-4 text-green-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-900">{stats.newLeads}</div>
+                <Card className="border-0 bg-transparent shadow-none w-full">
+                  <CardContent className="p-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="min-w-[4rem] h-16 bg-black rounded-xl flex items-center justify-center px-3">
+                        <span className="text-white font-bold text-3xl">{formatStatValue(stats.newLeads)}</span>
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <div className="text-sm text-gray-500">Total Number of</div>
+                        <div className="text-base font-semibold text-black">New Leads</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Button>
               <Button
                 variant="ghost"
-                className="p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-blue-100/30 hover:from-blue-50/50 hover:to-blue-100/50"
+                className="p-0 h-auto border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl w-full justify-start"
                 onClick={() => navigate("/leads/cold")}
               >
-                <Card className="border-0 bg-transparent">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-600">Cold Leads</CardTitle>
-                    <Users className="h-4 w-4 text-blue-400" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-900">{stats.coldLeads}</div>
+                <Card className="border-0 bg-transparent shadow-none w-full">
+                  <CardContent className="p-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="min-w-[4rem] h-16 bg-blue-400 rounded-xl flex items-center justify-center px-3">
+                        <span className="text-white font-bold text-3xl">{formatStatValue(stats.coldLeads)}</span>
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <div className="text-sm text-gray-500">Total Number of</div>
+                        <div className="text-base font-semibold text-black">Cold Leads</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Button>
               <Button
                 variant="ghost"
-                className="p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-red-50/30 hover:from-red-50/50 hover:to-red-100/50"
+                className="p-0 h-auto border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl w-full justify-start"
                 onClick={() => navigate("/leads/dead")}
               >
-                <Card className="border-0 bg-transparent">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-600">Dead Leads</CardTitle>
-                    <Users className="h-4 w-4 text-red-400" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-900">{stats.deadLeads}</div>
+                <Card className="border-0 bg-transparent shadow-none w-full">
+                  <CardContent className="p-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="min-w-[4rem] h-16 bg-red-500 rounded-xl flex items-center justify-center px-3">
+                        <span className="text-white font-bold text-3xl">{formatStatValue(stats.deadLeads)}</span>
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <div className="text-sm text-gray-500">Total Number of</div>
+                        <div className="text-base font-semibold text-black">Dead Leads</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Button>
               <Button
                 variant="ghost"
-                className="p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-orange-50/30 hover:from-orange-50/50 hover:to-orange-100/50"
+                className="p-0 h-auto border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl w-full justify-start"
                 onClick={() => navigate("/leads/hot")}
               >
-                <Card className="border-0 bg-transparent">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-600">Hot Leads</CardTitle>
-                    <TrendingUp className="h-4 w-4 text-orange-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-900">{stats.hotLeads}</div>
+                <Card className="border-0 bg-transparent shadow-none w-full">
+                  <CardContent className="p-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="min-w-[4rem] h-16 bg-orange-500 rounded-xl flex items-center justify-center px-3">
+                        <span className="text-white font-bold text-3xl">{formatStatValue(stats.hotLeads)}</span>
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <div className="text-sm text-gray-500">Total Number of</div>
+                        <div className="text-base font-semibold text-black">Hot Leads</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Button>
               <Button
                 variant="ghost"
-                className="p-0 h-auto border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-emerald-50/30 hover:from-emerald-50/50 hover:to-emerald-100/50"
+                className="p-0 h-auto border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl w-full justify-start"
                 onClick={() => navigate("/leads/converted")}
               >
-                <Card className="border-0 bg-transparent">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-600">Converted Leads</CardTitle>
-                    <UserCheck className="h-4 w-4 text-emerald-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-900">{stats.converted}</div>
+                <Card className="border-0 bg-transparent shadow-none w-full">
+                  <CardContent className="p-2">
+                    <div className="flex items-center space-x-3">
+                      <div className="min-w-[4rem] h-16 bg-green-600 rounded-xl flex items-center justify-center px-3">
+                        <span className="text-white font-bold text-3xl">{formatStatValue(stats.converted)}</span>
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <div className="text-sm text-gray-500">Total Number of</div>
+                        <div className="text-base font-semibold text-black">Converted Leads</div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </Button>
-              <Card className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white to-blue-50/30">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-600">Total Leads</CardTitle>
-                  <Users className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900">{stats.totalLeads}</div>
+              <Card className="border-0 shadow-md hover:shadow-lg transition-all duration-300 bg-white rounded-xl">
+                <CardContent className="p-2">
+                  <div className="flex items-center space-x-3">
+                    <div className="min-w-[4rem] h-16 bg-black rounded-xl flex items-center justify-center px-3">
+                      <span className="text-white font-bold text-3xl">{formatStatValue(stats.totalLeads)}</span>
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <div className="text-sm text-gray-500">Total Number of</div>
+                      <div className="text-base font-semibold text-black">All Our Leads</div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -645,9 +1164,11 @@ const Index = () => {
               stayDurations={stayDurations}
               leadSources={leadSources}
               salespeople={salespeople}
+              studioViews={studioViews}
               onConvertLead={handleConvertLead}
               onUpdateLead={handleUpdateLead}
               onDeleteLead={handleDeleteLead}
+              operationLoading={operationLoading}
             />
           </TabsContent>
 
@@ -664,42 +1185,56 @@ const Index = () => {
               stayDurations={stayDurations}
               onUpdateStudent={handleUpdateStudent}
               onDeleteStudent={handleDeleteStudent}
-              onAddStudent={(newStudent) => setStudents(prev => [...prev, newStudent])}
+              onAddStudent={handleAddStudent}
+            />
+          </TabsContent>
+
+          <TabsContent value="tourists">
+            <TouristManagement 
+              tourists={tourists}
+              studios={studios}
+              roomGrades={roomGrades}
+              onUpdateTourist={handleUpdateTourist}
+              onDeleteTourist={handleDeleteTourist}
+              onAddTourist={handleAddTourist}
             />
           </TabsContent>
 
           <TabsContent value="studios">
             <StudioManagement 
               studios={studios}
+              students={students}
+              tourists={tourists}
               studioStats={studioStats}
               onUpdateStudio={handleUpdateStudio}
               onDeleteStudio={handleDeleteStudio}
               onAddStudio={handleAddStudio}
               roomGrades={roomGrades}
+              studioViews={studioViews}
             />
           </TabsContent>
 
           <TabsContent value="analytics">
             <Analytics leads={leads} students={students} />
+        
+        {/* Database Status Check */}
+        <div className="col-span-1">
+          <QuickDataCheck />
+        </div>
           </TabsContent>
 
-          <TabsContent value="reports">
-            <Reports />
-          </TabsContent>
-
-          <TabsContent value="settings">
-            <Settings />
-          </TabsContent>
         </Tabs>
-      </main>
+        </>
+      )}
+    </main>
 
-      <LeadDetailsModal
-        lead={selectedLead}
-        isOpen={isLeadDetailsOpen}
-        onClose={() => setIsLeadDetailsOpen(false)}
-      />
-    </div>
-  );
+    <LeadDetailsModal
+      lead={selectedLead}
+      isOpen={isLeadDetailsOpen}
+      onClose={() => setIsLeadDetailsOpen(false)}
+    />
+  </div>
+);
 };
 
 export default Index;
