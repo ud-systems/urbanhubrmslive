@@ -31,7 +31,7 @@ export interface StripeConfig {
 // Default Stripe configuration
 export const defaultStripeConfig: StripeConfig = {
   publishableKey: 'pk_test_51Qhy84IwhoZJMJiysLyBysUJASo303JBZ77jnNVyH5phk61loeoTC17UBUaOSAkrZ7ohJeoHn3SPypS8l6fyFRha00XuWeOdxb',
-  secretKey: process.env.STRIPE_SECRET_KEY || '',
+  secretKey: import.meta.env.VITE_STRIPE_SECRET_KEY || '',
   isLiveMode: false,
-  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || ''
+  webhookSecret: import.meta.env.VITE_STRIPE_WEBHOOK_SECRET || ''
 }; 

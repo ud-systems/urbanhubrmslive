@@ -793,7 +793,7 @@ const StudentPortal = () => {
                 </Card>
 
                 {/* Profile Component */}
-                {student ? (
+                {student && student.id ? (
                   <ComprehensiveStudentProfile 
                     key={`profile-${student.id}`} 
                     studentId={student.id} 
