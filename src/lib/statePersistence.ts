@@ -14,20 +14,26 @@ interface StatePersistenceConfig {
   key: string;
   ttl?: number; // Time to live in milliseconds
   encrypt?: boolean;
+  silent?: boolean; // Suppress console logging
 }
 
 class StatePersistence {
   private static instance: StatePersistence;
   private storageKey = 'urbanhub-app-state';
   private defaultTTL = 24 * 60 * 60 * 1000; // 24 hours
+  private isProduction = import.meta.env.PROD;
+  private isRestoring = false;
 
   private constructor() {
     try {
       this.initializeVisibilityHandlers();
       this.initializeFocusHandlers();
       this.initializeStorageHandlers();
+      this.initializeBeforeUnloadHandler();
     } catch (error) {
-      console.warn('StatePersistence initialization failed:', error);
+      if (!this.isProduction) {
+        console.warn('StatePersistence initialization failed:', error);
+      }
     }
   }
 
@@ -44,6 +50,7 @@ class StatePersistence {
       const key = config?.key || this.storageKey;
       const timestamp = Date.now();
       const ttl = config?.ttl || this.defaultTTL;
+      const silent = config?.silent || this.isProduction;
 
       const stateToSave = {
         ...state,
@@ -57,9 +64,13 @@ class StatePersistence {
       // Also save to sessionStorage for immediate access
       sessionStorage.setItem(key, serializedState);
 
-      console.log('💾 State saved:', key, stateToSave);
+      if (!silent) {
+        console.log('💾 State saved:', key, stateToSave);
+      }
     } catch (error) {
-      console.error('Error saving state:', error);
+      if (!this.isProduction) {
+        console.error('Error saving state:', error);
+      }
     }
   }
 
@@ -67,6 +78,7 @@ class StatePersistence {
   loadState<T = AppState>(config?: StatePersistenceConfig): T | null {
     try {
       const key = config?.key || this.storageKey;
+      const silent = config?.silent || this.isProduction;
       
       // Try sessionStorage first (faster)
       let serializedState = sessionStorage.getItem(key);
@@ -88,10 +100,14 @@ class StatePersistence {
         return null;
       }
 
-      console.log('📂 State loaded:', key, state);
+      if (!silent) {
+        console.log('📂 State loaded:', key, state);
+      }
       return state;
     } catch (error) {
-      console.error('Error loading state:', error);
+      if (!this.isProduction) {
+        console.error('Error loading state:', error);
+      }
       return null;
     }
   }
@@ -101,7 +117,9 @@ class StatePersistence {
     const stateKey = key || this.storageKey;
     localStorage.removeItem(stateKey);
     sessionStorage.removeItem(stateKey);
-    console.log('🗑️ State cleared:', stateKey);
+    if (!this.isProduction) {
+      console.log('🗑️ State cleared:', stateKey);
+    }
   }
 
   // Clear all app state
@@ -115,15 +133,17 @@ class StatePersistence {
       sessionStorage.removeItem(key);
     });
 
-    console.log('🗑️ All app state cleared');
+    if (!this.isProduction) {
+      console.log('🗑️ All app state cleared');
+    }
   }
 
   // Initialize visibility change handlers
   private initializeVisibilityHandlers(): void {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        // Page became visible - restore state if needed
-        this.restoreStateOnVisibility();
+        // Page became visible - immediately restore state
+        this.immediateStateRestoration();
       } else {
         // Page became hidden - save current state
         this.saveCurrentState();
@@ -136,8 +156,8 @@ class StatePersistence {
   // Initialize focus handlers
   private initializeFocusHandlers(): void {
     const handleFocus = () => {
-      // Window gained focus - restore state
-      this.restoreStateOnFocus();
+      // Window gained focus - immediately restore state
+      this.immediateStateRestoration();
     };
 
     const handleBlur = () => {
@@ -161,6 +181,50 @@ class StatePersistence {
     window.addEventListener('storage', handleStorageChange);
   }
 
+  // Initialize beforeunload handler to save state before page unload
+  private initializeBeforeUnloadHandler(): void {
+    const handleBeforeUnload = () => {
+      this.saveCurrentState();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+  }
+
+  // Immediate state restoration for tab switching
+  private immediateStateRestoration(): void {
+    if (this.isRestoring) return;
+    
+    try {
+      this.isRestoring = true;
+      const savedState = this.loadState({ silent: true });
+      
+      if (savedState && savedState.currentRoute) {
+        const currentRoute = window.location.pathname + window.location.search;
+        
+        // Only restore if we're not already on the correct route
+        if (currentRoute !== savedState.currentRoute) {
+          if (!this.isProduction) {
+            console.log('🔄 Immediate route restoration:', savedState.currentRoute);
+          }
+          
+          // Use replaceState to avoid adding to browser history
+          window.history.replaceState(null, '', savedState.currentRoute);
+          
+          // Trigger a custom event for components to handle restoration
+          window.dispatchEvent(new CustomEvent('immediateStateRestored', { 
+            detail: savedState 
+          }));
+        }
+      }
+    } catch (error) {
+      if (!this.isProduction) {
+        console.error('Error in immediate state restoration:', error);
+      }
+    } finally {
+      this.isRestoring = false;
+    }
+  }
+
   // Save current application state
   private saveCurrentState(): void {
     try {
@@ -170,42 +234,52 @@ class StatePersistence {
         timestamp: Date.now()
       };
 
-      this.saveState(currentState);
+      this.saveState(currentState, { silent: true });
     } catch (error) {
-      console.error('Error saving current state:', error);
+      if (!this.isProduction) {
+        console.error('Error saving current state:', error);
+      }
     }
   }
 
   // Restore state when page becomes visible
   private restoreStateOnVisibility(): void {
     try {
-      const savedState = this.loadState();
+      const savedState = this.loadState({ silent: true });
       if (savedState && savedState.currentRoute) {
         // Only restore if we're not already on the correct route
         const currentRoute = window.location.pathname + window.location.search;
         if (currentRoute !== savedState.currentRoute) {
-          console.log('🔄 Restoring route on visibility:', savedState.currentRoute);
+          if (!this.isProduction) {
+            console.log('🔄 Restoring route on visibility:', savedState.currentRoute);
+          }
           window.history.replaceState(null, '', savedState.currentRoute);
         }
       }
     } catch (error) {
-      console.error('Error restoring state on visibility:', error);
+      if (!this.isProduction) {
+        console.error('Error restoring state on visibility:', error);
+      }
     }
   }
 
   // Restore state when window gains focus
   private restoreStateOnFocus(): void {
     try {
-      const savedState = this.loadState();
+      const savedState = this.loadState({ silent: true });
       if (savedState) {
-        console.log('🎯 Restoring state on focus:', savedState);
+        if (!this.isProduction) {
+          console.log('🎯 Restoring state on focus:', savedState);
+        }
         // Trigger a custom event for components to listen to
         window.dispatchEvent(new CustomEvent('stateRestored', { 
           detail: savedState 
         }));
       }
     } catch (error) {
-      console.error('Error restoring state on focus:', error);
+      if (!this.isProduction) {
+        console.error('Error restoring state on focus:', error);
+      }
     }
   }
 
@@ -214,7 +288,9 @@ class StatePersistence {
     try {
       if (event.newValue) {
         const newState = JSON.parse(event.newValue);
-        console.log('🔄 Cross-tab state change detected:', newState);
+        if (!this.isProduction) {
+          console.log('🔄 Cross-tab state change detected:', newState);
+        }
         
         // Trigger event for components to update
         window.dispatchEvent(new CustomEvent('crossTabStateChange', { 
@@ -222,7 +298,9 @@ class StatePersistence {
         }));
       }
     } catch (error) {
-      console.error('Error handling cross-tab state change:', error);
+      if (!this.isProduction) {
+        console.error('Error handling cross-tab state change:', error);
+      }
     }
   }
 
@@ -247,6 +325,11 @@ class StatePersistence {
     if (!state || !state.timestamp) return Infinity;
 
     return Math.floor((Date.now() - state.timestamp) / (1000 * 60));
+  }
+
+  // Force immediate state restoration (public method)
+  forceRestoration(): void {
+    this.immediateStateRestoration();
   }
 }
 

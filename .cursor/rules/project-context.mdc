@@ -1,3 +1,6 @@
+---
+alwaysApply: true
+---
 # URBAN HUB LEAD MANAGEMENT SYSTEM - PROJECT CONTEXT
 
 ## PROJECT OVERVIEW
@@ -43,7 +46,3 @@ This is a comprehensive lead management system for Urban Hub with the following 
 5. Validate form inputs and user flows
 6. Check intermodule communication
 7. Verify no broken links or permissions
-description:
-globs:
-alwaysApply: false
----

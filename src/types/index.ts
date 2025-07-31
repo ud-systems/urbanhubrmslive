@@ -573,4 +573,30 @@ export interface StudentApplication {
   is_complete: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+// Website types
+export interface Website {
+  id: string;
+  name: string;
+  url: string;
+  description: string;
+  status: 'active' | 'inactive' | 'maintenance';
+  type: 'landing_page' | 'booking_site' | 'marketing_site' | 'portal';
+  analytics_enabled: boolean;
+  seo_optimized: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  updated_by?: string;
+}
+
+export interface WebsiteFormData {
+  name: string;
+  url: string;
+  description: string;
+  status: 'active' | 'inactive' | 'maintenance';
+  type: 'landing_page' | 'booking_site' | 'marketing_site' | 'portal';
+  analytics_enabled: boolean;
+  seo_optimized: boolean;
 } 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { useNavigation } from "@/hooks/useNavigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -86,7 +87,7 @@ interface Student {
 }
 
 const StudentPortal = () => {
-  const navigate = useNavigate();
+  const { navigate } = useNavigation();
   const { studentId } = useParams();
   const { user, logout } = useAuth();
   const { toast } = useToast();
@@ -173,14 +174,14 @@ const StudentPortal = () => {
       }
 
       if (studentData) {
-        // Get studio information if student has a room assigned
+        // Get studio information if student has a studio assigned
         let studioInfo = null;
-        if (studentData.room && studentData.room !== 'Not assigned') {
+        if (studentData.assignedto && studentData.assignedto !== 'Not assigned') {
           try {
             const { data: studioData } = await supabase
               .from('studios')
               .select('*')
-              .eq('id', studentData.room)
+              .eq('id', studentData.assignedto)
               .single();
             
             if (studioData) {
@@ -213,6 +214,18 @@ const StudentPortal = () => {
           studio: studioInfo
         };
 
+        // Add payment plan data from students table first
+        if (studentData.selected_installment_plan) {
+          student.selected_installment_plan = studentData.selected_installment_plan;
+          student.wants_installments = studentData.wants_installments || false;
+          student.payment_installments = studentData.payment_installments || '';
+          console.log('💳 Payment plan data from students table:', {
+            selected_installment_plan: student.selected_installment_plan,
+            wants_installments: student.wants_installments,
+            payment_installments: student.payment_installments
+          });
+        }
+
         // Fetch application data to get document URLs and other fields
         if (studentData.user_id) {
           try {
@@ -235,11 +248,18 @@ const StudentPortal = () => {
               student.current_visa_url = applicationData.current_visa_url;
               student.current_visa_filename = applicationData.current_visa_filename;
               
-              // Add payment information
-              student.selected_installment_plan = applicationData.selected_installment_plan;
-              student.wants_installments = applicationData.wants_installments;
-              student.payment_installments = applicationData.payment_installments;
-              student.deposit_paid = applicationData.deposit_paid;
+              // Add payment information from application data (override if available)
+              if (applicationData.selected_installment_plan) {
+                student.selected_installment_plan = applicationData.selected_installment_plan;
+                student.wants_installments = applicationData.wants_installments || false;
+                student.payment_installments = applicationData.payment_installments || '';
+                console.log('💳 Payment plan data from application table:', {
+                  selected_installment_plan: student.selected_installment_plan,
+                  wants_installments: student.wants_installments,
+                  payment_installments: student.payment_installments
+                });
+              }
+              student.deposit_paid = applicationData.deposit_paid || false;
               
               // Calculate profile completion
               const documents = [
@@ -256,6 +276,49 @@ const StudentPortal = () => {
             console.warn('Could not fetch application data:', appError);
           }
         }
+
+        // If no application data or payment plan info is missing, try to get it from students table
+        if (!student.selected_installment_plan && studentData.payment_plan_id) {
+          try {
+            // Use the safer database function first
+            const { data: paymentPlanData, error: functionError } = await supabase
+              .rpc('get_payment_plan_safe', { plan_id: studentData.payment_plan_id });
+            
+            if (!functionError && paymentPlanData && paymentPlanData.length > 0) {
+              student.selected_installment_plan = paymentPlanData[0].name;
+              student.wants_installments = true;
+              console.log('💳 Payment plan data from database function:', {
+                selected_installment_plan: student.selected_installment_plan,
+                wants_installments: student.wants_installments
+              });
+            } else {
+              // Fallback to direct query
+              const { data: paymentPlan } = await supabase
+                .from('payment_plans')
+                .select('name')
+                .eq('id', studentData.payment_plan_id)
+                .eq('is_active', true)
+                .single();
+              
+              if (paymentPlan?.name) {
+                student.selected_installment_plan = paymentPlan.name;
+                student.wants_installments = true;
+                console.log('💳 Payment plan data from direct query:', {
+                  selected_installment_plan: student.selected_installment_plan,
+                  wants_installments: student.wants_installments
+                });
+              }
+            }
+          } catch (paymentError) {
+            console.warn('Could not fetch payment plan name:', paymentError);
+          }
+        }
+
+        console.log('💳 Final student payment plan data:', {
+          selected_installment_plan: student.selected_installment_plan,
+          wants_installments: student.wants_installments,
+          payment_installments: student.payment_installments
+        });
         
         setStudent(student);
         
@@ -792,6 +855,8 @@ const StudentPortal = () => {
                   </CardContent>
                 </Card>
 
+
+
                 {/* Profile Component */}
                 {student && student.id ? (
                   <ComprehensiveStudentProfile 
@@ -1064,6 +1129,7 @@ const StudentPortal = () => {
                     <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                       <h4 className="font-medium text-yellow-900 mb-2">No Payment Plan Selected</h4>
                       <p className="text-sm text-yellow-700">Please contact support to set up your payment plan.</p>
+
                     </div>
                   )}
                 </CardContent>

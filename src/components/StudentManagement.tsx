@@ -108,14 +108,14 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
 
   // Fetch payment plans on component mount
   useEffect(() => {
-    const fetchPaymentPlans = async () => {
-      try {
-        const plans = await getPaymentPlans();
-        setPaymentPlans(plans || []);
-      } catch (error) {
-        console.error('Error fetching payment plans:', error);
-      }
-    };
+      const fetchPaymentPlans = async () => {
+    try {
+      const plans = await getPaymentPlans();
+      setPaymentPlans(plans || []);
+    } catch (error) {
+      console.error('Error fetching payment plans:', error);
+    }
+  };
     fetchPaymentPlans();
   }, []);
 
@@ -290,6 +290,8 @@ const StudentManagement = ({ students, studios, studioStats, roomGrades, stayDur
         // Note: Don't include 'room' field as it causes foreign key constraint violations
         // The 'assignedto' field handles studio assignment
       };
+
+
 
       // Create student with user account link
       const result = await createStudentWithUserAccount(studentData);

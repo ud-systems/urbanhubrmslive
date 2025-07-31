@@ -74,7 +74,9 @@ const mapSessionToUserWithValidation = async (session: Session | null, fetchUser
     const profile = await fetchUserProfile(session.user.id);
     
     if (!profile || !profile.approved) {
-      console.warn('User session exists but profile not approved:', session.user.email);
+      if (!import.meta.env.PROD) {
+        console.warn('User session exists but profile not approved:', session.user.email);
+      }
       return null;
     }
     
@@ -86,7 +88,9 @@ const mapSessionToUserWithValidation = async (session: Session | null, fetchUser
       avatar: session.user.user_metadata?.avatar_url || undefined,
     };
   } catch (error) {
-    console.error('Error validating user profile during session restoration:', error);
+    if (!import.meta.env.PROD) {
+      console.error('Error validating user profile during session restoration:', error);
+    }
     return null;
   }
 };
@@ -115,12 +119,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             role: newUser.role,
             avatar: newUser.avatar
           }
-        }, { key: 'urbanhub-auth-state' });
+        }, { key: 'urbanhub-auth-state', silent: true });
       } else {
         statePersistence.clearState('urbanhub-auth-state');
       }
     } catch (error) {
-      console.warn('Failed to persist user state:', error);
+      if (!import.meta.env.PROD) {
+        console.warn('Failed to persist user state:', error);
+      }
     }
   }, []);
 
@@ -131,22 +137,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       try {
         // First, try to restore user state from persistence
         try {
-          const savedAuthState = statePersistence.loadState({ key: 'urbanhub-auth-state' });
+          const savedAuthState = statePersistence.loadState({ key: 'urbanhub-auth-state', silent: true });
           if (savedAuthState?.user && !statePersistence.isStateStale('urbanhub-auth-state')) {
-            console.log('🔄 Restoring user state from persistence:', savedAuthState.user);
+            if (!import.meta.env.PROD) {
+              console.log('🔄 Restoring user state from persistence:', savedAuthState.user);
+            }
             setUser(savedAuthState.user);
             setLoading(false);
             setInitializing(false);
           }
         } catch (error) {
-          console.warn('Failed to restore user state from persistence:', error);
+          if (!import.meta.env.PROD) {
+            console.warn('Failed to restore user state from persistence:', error);
+          }
         }
 
         // Then check for active session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
-          console.error('Error getting session:', sessionError);
+          if (!import.meta.env.PROD) {
+            console.error('Error getting session:', sessionError);
+          }
           if (mounted) {
             setUserWithPersistence(null);
             setLoading(false);
@@ -175,7 +187,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 setInitializing(false);
               }
             } else {
-              console.warn('User not approved or not found in database, clearing session...');
+              if (!import.meta.env.PROD) {
+                console.warn('User not approved or not found in database, clearing session...');
+              }
               await supabase.auth.signOut();
               if (mounted) {
                 setUserWithPersistence(null);
@@ -184,7 +198,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               }
             }
           } catch (profileError) {
-            console.error('Error validating user profile:', profileError);
+            if (!import.meta.env.PROD) {
+              console.error('Error validating user profile:', profileError);
+            }
             // Don't clear session for profile errors, just use basic session data
             const user = {
               id: session.user.id,
@@ -208,7 +224,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         }
       } catch (error) {
-        console.error('Auth initialization error:', error);
+        if (!import.meta.env.PROD) {
+          console.error('Auth initialization error:', error);
+        }
         if (mounted) {
           setUserWithPersistence(null);
           setLoading(false);
@@ -243,12 +261,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
       if (error) {
-        console.error('Error fetching user profile:', error);
+        if (!import.meta.env.PROD) {
+          console.error('Error fetching user profile:', error);
+        }
         throw error;
       }
       return data;
     } catch (error) {
-      console.error('Failed to fetch user profile for ID:', userId, error);
+      if (!import.meta.env.PROD) {
+        console.error('Failed to fetch user profile for ID:', userId, error);
+      }
       throw error;
     }
   };
@@ -358,13 +380,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('Logout error:', error);
+        if (!import.meta.env.PROD) {
+          console.error('Logout error:', error);
+        }
       }
       setUserWithPersistence(null);
       // Clear all app state on logout
       statePersistence.clearAllState();
     } catch (error) {
-      console.error('Logout error:', error);
+      if (!import.meta.env.PROD) {
+        console.error('Logout error:', error);
+      }
       setUserWithPersistence(null);
     } finally {
       setLoading(false);

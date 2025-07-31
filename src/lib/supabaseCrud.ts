@@ -1013,10 +1013,20 @@ export const createStudentWithUserAccount = async (studentData) => {
       duration_weeks: studentData.duration_weeks || 
         (studentData.duration?.includes('45') ? 45 : 
          studentData.duration?.includes('51') ? 51 : null),
-      deposit_paid: studentData.deposit_paid || false
+      deposit_paid: studentData.deposit_paid || false,
+      // Add payment plan name to student record for direct access
+      selected_installment_plan: studentData.selected_installment_plan || '',
+      wants_installments: studentData.wants_installments || false,
+      payment_installments: studentData.payment_installments || ''
     };
 
     console.log('📝 Student data prepared:', studentWithUserId);
+    console.log('💳 Payment plan data being stored in students table:', {
+      payment_plan_id: studentWithUserId.payment_plan_id,
+      selected_installment_plan: studentWithUserId.selected_installment_plan,
+      wants_installments: studentWithUserId.wants_installments,
+      payment_installments: studentWithUserId.payment_installments
+    });
 
     const createdStudent = await createStudent(studentWithUserId);
     
@@ -1025,6 +1035,12 @@ export const createStudentWithUserAccount = async (studentData) => {
     }
 
     console.log('✅ Student created:', createdStudent);
+    console.log('💳 Payment plan data in student record:', {
+      payment_plan_id: createdStudent.payment_plan_id,
+      selected_installment_plan: createdStudent.selected_installment_plan,
+      wants_installments: createdStudent.wants_installments,
+      payment_installments: createdStudent.payment_installments
+    });
     
     // Automatically create comprehensive application record with ALL student data
     if (createdStudent) {
@@ -1040,10 +1056,22 @@ export const createStudentWithUserAccount = async (studentData) => {
       };
 
       console.log('📋 Application data prepared:', applicationData);
+      console.log('💳 Payment plan data in application:', {
+        selected_installment_plan: applicationData.selected_installment_plan,
+        wants_installments: applicationData.wants_installments,
+        payment_installments: applicationData.payment_installments,
+        payment_plan_id: applicationData.payment_plan_id
+      });
 
       try {
         const createdApplication = await createStudentApplication(applicationData);
         console.log('✅ Application record created successfully:', createdApplication);
+        console.log('💳 Final payment plan data in application:', {
+          selected_installment_plan: createdApplication.selected_installment_plan,
+          wants_installments: createdApplication.wants_installments,
+          payment_installments: createdApplication.payment_installments,
+          payment_plan_id: createdApplication.payment_plan_id
+        });
       } catch (appError) {
         console.warn('⚠️ Failed to create application record:', appError);
         // Don't fail the entire operation if application creation fails
@@ -1195,6 +1223,7 @@ export const createStudentApplication = async (applicationData) => {
   try {
     console.log('📝 Creating student application with data:', applicationData);
     
+    // First attempt: Direct insert
     const { data, error } = await supabase
       .from('student_applications')
       .insert([applicationData])
@@ -1202,8 +1231,72 @@ export const createStudentApplication = async (applicationData) => {
       .single();
 
     if (error) {
-      console.error('❌ Error creating student application:', error);
-      throw error;
+      console.warn('⚠️ Direct insert failed, trying service function:', error);
+      
+      // Second attempt: Use service function as fallback
+      try {
+        const { data: serviceData, error: serviceError } = await supabase
+          .rpc('create_student_application_service', {
+            p_user_id: applicationData.user_id,
+            p_first_name: applicationData.first_name,
+            p_last_name: applicationData.last_name,
+            p_email: applicationData.email,
+            p_mobile: applicationData.mobile,
+            p_birthday: applicationData.birthday,
+            p_age: applicationData.age,
+            p_ethnicity: applicationData.ethnicity,
+            p_gender: applicationData.gender,
+            p_ucas_id: applicationData.ucas_id,
+            p_country: applicationData.country,
+            p_address_line_1: applicationData.address_line_1,
+            p_address_line_2: applicationData.address_line_2,
+            p_post_code: applicationData.post_code,
+            p_town: applicationData.town,
+            p_year_of_study: applicationData.year_of_study,
+            p_field_of_study: applicationData.field_of_study,
+            p_is_disabled: applicationData.is_disabled,
+            p_is_smoker: applicationData.is_smoker,
+            p_medical_requirements: applicationData.medical_requirements,
+            p_entry_into_uk: applicationData.entry_into_uk,
+            p_wants_installments: applicationData.wants_installments,
+            p_selected_installment_plan: applicationData.selected_installment_plan,
+            p_payment_installments: applicationData.payment_installments,
+            p_data_consent: applicationData.data_consent,
+            p_deposit_paid: applicationData.deposit_paid,
+            p_guarantor_name: applicationData.guarantor_name,
+            p_guarantor_email: applicationData.guarantor_email,
+            p_guarantor_phone: applicationData.guarantor_phone,
+            p_guarantor_date_of_birth: applicationData.guarantor_date_of_birth,
+            p_guarantor_relationship: applicationData.guarantor_relationship,
+            p_utility_bill_url: applicationData.utility_bill_url,
+            p_utility_bill_filename: applicationData.utility_bill_filename,
+            p_identity_document_url: applicationData.identity_document_url,
+            p_identity_document_filename: applicationData.identity_document_filename,
+            p_bank_statement_url: applicationData.bank_statement_url,
+            p_bank_statement_filename: applicationData.bank_statement_filename,
+            p_passport_url: applicationData.passport_url,
+            p_passport_filename: applicationData.passport_filename,
+            p_current_visa_url: applicationData.current_visa_url,
+            p_current_visa_filename: applicationData.current_visa_filename,
+            p_current_step: applicationData.current_step,
+            p_is_complete: applicationData.is_complete,
+            p_date_of_inquiry: applicationData.date_of_inquiry,
+            p_lead_notes: applicationData.lead_notes,
+            p_source: applicationData.source
+          });
+
+        if (serviceError) {
+          console.error('❌ Service function also failed:', serviceError);
+          throw serviceError;
+        }
+        
+        console.log('✅ Student application created via service function:', serviceData);
+        clearCache('student_applications');
+        return serviceData;
+      } catch (serviceError) {
+        console.error('❌ Both direct insert and service function failed:', serviceError);
+        throw serviceError;
+      }
     }
     
     console.log('✅ Student application created successfully:', data);
@@ -2741,16 +2834,40 @@ const mapStudentDataToApplication = async (studentData: any, source: 'lead' | 'd
   if (studentData.payment_plan_id) {
     try {
       console.log('💳 Fetching payment plan name for ID:', studentData.payment_plan_id);
-      const { data: paymentPlan } = await supabase
-        .from('payment_plans')
-        .select('name')
-        .eq('id', studentData.payment_plan_id)
-        .single();
-      paymentPlanName = paymentPlan?.name || '';
-      console.log('💳 Payment plan name:', paymentPlanName);
+      
+      // Use the safer database function first
+      const { data: paymentPlanData, error: functionError } = await supabase
+        .rpc('get_payment_plan_safe', { plan_id: studentData.payment_plan_id });
+      
+      if (!functionError && paymentPlanData && paymentPlanData.length > 0) {
+        paymentPlanName = paymentPlanData[0].name || '';
+        console.log('💳 Payment plan name from function:', paymentPlanName);
+      } else {
+        // Fallback to direct query
+        const { data: paymentPlan, error } = await supabase
+          .from('payment_plans')
+          .select('name')
+          .eq('id', studentData.payment_plan_id)
+          .eq('is_active', true)
+          .single();
+        
+        if (error) {
+          console.warn('Failed to fetch payment plan name:', error);
+          // Fallback to the selected_installment_plan if available
+          paymentPlanName = studentData.selected_installment_plan || '';
+        } else {
+          paymentPlanName = paymentPlan?.name || '';
+        }
+        console.log('💳 Payment plan name from direct query:', paymentPlanName);
+      }
     } catch (error) {
       console.warn('Failed to fetch payment plan name:', error);
+      // Fallback to the selected_installment_plan if available
+      paymentPlanName = studentData.selected_installment_plan || '';
     }
+  } else if (studentData.selected_installment_plan) {
+    // Use the selected_installment_plan if payment_plan_id is not available
+    paymentPlanName = studentData.selected_installment_plan;
   }
 
   // Map data based on source
@@ -2760,7 +2877,7 @@ const mapStudentDataToApplication = async (studentData: any, source: 'lead' | 'd
     last_name: '', // Keep empty for full name approach
     email: studentData.email || '',
     mobile: studentData.phone || '',
-    birthday: studentData.birthday || '',
+    birthday: studentData.birthday || null, // Use null instead of empty string for dates
     age: studentData.age || calculateAge(studentData.birthday || ''),
     ethnicity: studentData.ethnicity || '',
     gender: studentData.gender || '',
@@ -2794,7 +2911,7 @@ const mapStudentDataToApplication = async (studentData: any, source: 'lead' | 'd
     guarantor_name: studentData.guarantor_name || '',
     guarantor_email: studentData.guarantor_email || '',
     guarantor_phone: studentData.guarantor_phone || '',
-    guarantor_date_of_birth: studentData.guarantor_date_of_birth || '',
+    guarantor_date_of_birth: studentData.guarantor_date_of_birth || null, // Use null instead of empty string
     guarantor_relationship: studentData.guarantor_relationship || '',
     
     // Document Uploads (mapped from student data)
@@ -2821,7 +2938,7 @@ const mapStudentDataToApplication = async (studentData: any, source: 'lead' | 'd
     // Additional lead-specific mappings
     mappedData['source'] = studentData.source || '';
     mappedData['lead_notes'] = studentData.notes || '';
-    mappedData['date_of_inquiry'] = studentData.dateofinquiry || '';
+    mappedData['date_of_inquiry'] = studentData.dateofinquiry || null; // Use null instead of empty string
     console.log('📋 Lead-specific data mapped:', {
       source: mappedData['source'],
       lead_notes: mappedData['lead_notes'],

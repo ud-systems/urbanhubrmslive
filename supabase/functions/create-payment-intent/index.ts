@@ -1,63 +1,82 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 serve(async (req) => {
-  // Handle CORS
+  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
+      headers: corsHeaders,
     })
   }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    return new Response(JSON.stringify({ 
+      success: false,
+      error: 'Method not allowed' 
+    }), {
       status: 405,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        ...corsHeaders,
       },
     })
   }
 
   try {
-    const { amount, currency = 'gbp' } = await req.json()
+    const { amount, currency = 'gbp', description, student_id, invoice_id } = await req.json()
     
-    // Mock response - in production this would integrate with Stripe
+    if (!amount || amount <= 0) {
+      return new Response(JSON.stringify({ 
+        success: false,
+        error: 'Invalid amount' 
+      }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      })
+    }
+
+    // Mock payment intent for testing
     const mockPaymentIntent = {
-      id: `pi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `pi_mock_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       amount: amount,
       currency: currency,
       status: 'requires_payment_method',
-      client_secret: `pi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_secret_${Math.random().toString(36).substr(2, 9)}`,
+      client_secret: `pi_mock_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_secret_${Math.random().toString(36).substr(2, 9)}`,
       created: Math.floor(Date.now() / 1000)
     }
     
-    console.log('💰 Mock payment intent created:', mockPaymentIntent)
+    console.log('💰 Mock payment intent created:', mockPaymentIntent.id)
     
     return new Response(JSON.stringify({
       success: true,
-      paymentIntent: mockPaymentIntent
+      client_secret: mockPaymentIntent.client_secret,
+      payment_intent_id: mockPaymentIntent.id
     }), {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        ...corsHeaders,
       },
     })
   } catch (error) {
     console.error('❌ Error creating payment intent:', error)
     return new Response(JSON.stringify({
       success: false,
-      error: 'Failed to create payment intent'
+      error: error instanceof Error ? error.message : 'Failed to create payment intent'
     }), {
       status: 500,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        ...corsHeaders,
       },
     })
   }

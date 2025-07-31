@@ -9,6 +9,7 @@ interface UseStatePersistenceOptions {
   ttl?: number;
   autoSave?: boolean;
   autoRestore?: boolean;
+  silent?: boolean;
 }
 
 export const useStatePersistence = (options: UseStatePersistenceOptions = {}) => {
@@ -16,7 +17,8 @@ export const useStatePersistence = (options: UseStatePersistenceOptions = {}) =>
     key = 'component-state',
     ttl = 24 * 60 * 60 * 1000, // 24 hours
     autoSave = true,
-    autoRestore = true
+    autoRestore = true,
+    silent = true
   } = options;
 
   const [isRestoring, setIsRestoring] = useState(false);
@@ -24,32 +26,38 @@ export const useStatePersistence = (options: UseStatePersistenceOptions = {}) =>
   // Save state
   const saveState = useCallback((state: any) => {
     try {
-      statePersistence.saveState(state, { key, ttl });
+      statePersistence.saveState(state, { key, ttl, silent });
       if (autoSave) {
         saveAppState({ [key]: state });
       }
     } catch (error) {
-      console.error('Error saving state:', error);
+      if (!import.meta.env.PROD) {
+        console.error('Error saving state:', error);
+      }
     }
-  }, [key, ttl, autoSave]);
+  }, [key, ttl, autoSave, silent]);
 
   // Load state
   const loadState = useCallback(<T = any>(): T | null => {
     try {
-      const state = statePersistence.loadState<T>({ key });
+      const state = statePersistence.loadState<T>({ key, silent });
       return state;
     } catch (error) {
-      console.error('Error loading state:', error);
+      if (!import.meta.env.PROD) {
+        console.error('Error loading state:', error);
+      }
       return null;
     }
-  }, [key]);
+  }, [key, silent]);
 
   // Clear state
   const clearState = useCallback(() => {
     try {
       statePersistence.clearState(key);
     } catch (error) {
-      console.error('Error clearing state:', error);
+      if (!import.meta.env.PROD) {
+        console.error('Error clearing state:', error);
+      }
     }
   }, [key]);
 
@@ -59,7 +67,9 @@ export const useStatePersistence = (options: UseStatePersistenceOptions = {}) =>
       setIsRestoring(true);
       const savedState = loadState();
       if (savedState) {
-        console.log(`🔄 Auto-restoring state for key: ${key}`, savedState);
+        if (!silent && !import.meta.env.PROD) {
+          console.log(`🔄 Auto-restoring state for key: ${key}`, savedState);
+        }
         // Trigger a custom event for components to handle restoration
         window.dispatchEvent(new CustomEvent('stateRestored', {
           detail: { key, state: savedState }
@@ -67,19 +77,23 @@ export const useStatePersistence = (options: UseStatePersistenceOptions = {}) =>
       }
       setIsRestoring(false);
     }
-  }, [key, autoRestore, loadState]);
+  }, [key, autoRestore, loadState, silent]);
 
   // Listen for state restoration events
   useEffect(() => {
     const handleStateRestored = (event: CustomEvent) => {
       if (event.detail?.key === key) {
-        console.log(`🎯 State restored for key: ${key}`, event.detail.state);
+        if (!silent && !import.meta.env.PROD) {
+          console.log(`🎯 State restored for key: ${key}`, event.detail.state);
+        }
       }
     };
 
     const handleCrossTabChange = (event: CustomEvent) => {
       if (event.detail?.key === key) {
-        console.log(`🔄 Cross-tab state change for key: ${key}`, event.detail.state);
+        if (!silent && !import.meta.env.PROD) {
+          console.log(`🔄 Cross-tab state change for key: ${key}`, event.detail.state);
+        }
       }
     };
 
@@ -90,7 +104,7 @@ export const useStatePersistence = (options: UseStatePersistenceOptions = {}) =>
       window.removeEventListener('stateRestored', handleStateRestored as EventListener);
       window.removeEventListener('crossTabStateChange', handleCrossTabChange as EventListener);
     };
-  }, [key]);
+  }, [key, silent]);
 
   return {
     saveState,
@@ -120,9 +134,22 @@ export const useRoutePersistence = () => {
     return loadAppState();
   }, []);
 
+  const saveCurrentRoute = useCallback(() => {
+    const currentRoute = window.location.pathname + window.location.search;
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentTab = urlParams.get('tab') || 'dashboard';
+    
+    saveAppState({
+      currentRoute,
+      currentTab,
+      timestamp: Date.now()
+    });
+  }, []);
+
   return {
     saveRouteState,
-    loadRouteState
+    loadRouteState,
+    saveCurrentRoute
   };
 };
 
@@ -131,12 +158,13 @@ export const useFormPersistence = (formKey: string) => {
   const saveFormState = useCallback((formData: any) => {
     statePersistence.saveState(formData, { 
       key: `form-${formKey}`,
-      ttl: 60 * 60 * 1000 // 1 hour
+      ttl: 60 * 60 * 1000, // 1 hour
+      silent: true
     });
   }, [formKey]);
 
   const loadFormState = useCallback(<T = any>(): T | null => {
-    return statePersistence.loadState<T>({ key: `form-${formKey}` });
+    return statePersistence.loadState<T>({ key: `form-${formKey}`, silent: true });
   }, [formKey]);
 
   const clearFormState = useCallback(() => {

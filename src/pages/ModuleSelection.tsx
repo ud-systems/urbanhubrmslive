@@ -12,7 +12,8 @@ import {
   Calendar,
   Lock,
   CheckCircle,
-  Wrench
+  Wrench,
+  Globe
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { User } from "@/types";
@@ -96,6 +97,17 @@ const modules: Module[] = [
     color: 'indigo',
     gradient: 'from-indigo-600 to-indigo-700',
     requiredRole: ['admin', 'manager', 'salesperson', 'accountant', 'cleaner', 'student'],
+    status: 'active'
+  },
+  {
+    id: 'websites',
+    name: 'Websites',
+    description: 'Manage property websites and landing pages.',
+    icon: Globe,
+    route: '/websites',
+    color: 'cyan',
+    gradient: 'from-cyan-600 to-cyan-700',
+    requiredRole: ['admin'],
     status: 'active'
   }
 ];

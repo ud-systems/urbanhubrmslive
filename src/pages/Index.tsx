@@ -11,7 +11,7 @@ import LeadManagement from "@/components/LeadManagement";
 import StudentManagement from "@/components/StudentManagement";
 import TouristManagement from "@/components/TouristManagement";
 import Analytics from "@/components/Analytics";
-import QuickDataCheck from "@/components/QuickDataCheck";
+
 import StudioManagement from "@/components/StudioManagement";
 import LeadDetailsModal from "@/components/LeadDetailsModal";
 
@@ -1251,7 +1251,7 @@ const Index = () => {
         
         {/* Database Status Check */}
         <div className="col-span-1">
-          <QuickDataCheck />
+          
         </div>
           </TabsContent>
 

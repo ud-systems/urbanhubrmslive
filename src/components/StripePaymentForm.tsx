@@ -94,11 +94,13 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({
         }),
       });
 
-      const { client_secret, error: serverError } = await response.json();
+      const result = await response.json();
 
-      if (serverError) {
-        throw new Error(serverError);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create payment intent');
       }
+
+      const { client_secret } = result;
 
       // Confirm payment
       const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(

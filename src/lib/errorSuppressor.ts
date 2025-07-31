@@ -12,7 +12,36 @@ export const suppressNonCriticalErrors = () => {
     'Studio views fetched successfully',
     'User already exists',
     'Failed to load resource: the server responded with a status of 400',
-    'You may test your Stripe.js integration over HTTP'
+    'You may test your Stripe.js integration over HTTP',
+    'State saved:',
+    'State loaded:',
+    'State cleared:',
+    'Restoring user state from persistence:',
+    'Restoring route on visibility:',
+    'Restoring state on focus:',
+    'Cross-tab state change detected:',
+    'Auto-restoring state for key:',
+    'State restored for key:',
+    'Cross-tab state change for key:',
+    'Immediate route restoration:',
+    'Immediate state restoration:'
+  ];
+
+  // List of non-critical log patterns to suppress
+  const suppressedLogPatterns = [
+    '💾 State saved:',
+    '📂 State loaded:',
+    '🗑️ State cleared:',
+    '🔄 Restoring user state from persistence:',
+    '🔄 Restoring route on visibility:',
+    '🎯 Restoring state on focus:',
+    '🔄 Cross-tab state change detected:',
+    '🔄 Auto-restoring state for key:',
+    '🎯 State restored for key:',
+    '🔄 Cross-tab state change for key:',
+    '🔄 Immediate route restoration:',
+    '🔄 Immediate state restoration:',
+    'Studio views fetched successfully:'
   ];
 
   // Override console.error
@@ -45,6 +74,20 @@ export const suppressNonCriticalErrors = () => {
     }
     
     originalWarn.apply(console, args);
+  };
+
+  // Override console.log for non-critical logs
+  console.log = (...args) => {
+    const logMessage = args.join(' ');
+    
+    // Check if this is a non-critical log we want to suppress
+    const shouldSuppress = suppressedLogPatterns.some(pattern => 
+      logMessage.includes(pattern)
+    );
+    
+    if (!shouldSuppress) {
+      originalLog.apply(console, args);
+    }
   };
 
   // Return cleanup function
